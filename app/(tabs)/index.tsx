@@ -18,7 +18,6 @@ type ActiveProgram = {
 type WorkoutTemplate = {
   id: string;
   name?: string | null;
-  title?: string | null;
 };
 
 export default function TodayScreen() {
@@ -123,7 +122,7 @@ export default function TodayScreen() {
                 asChild>
                 <Pressable style={styles.templateCard}>
                   <ThemedText type="defaultSemiBold">
-                    {templates[0].name ?? templates[0].title ?? `Template ${templates[0].id}`}
+                    {templates[0].name ?? `Template ${templates[0].id}`}
                   </ThemedText>
                   <ThemedText style={styles.templateCta}>View workout →</ThemedText>
                 </Pressable>
