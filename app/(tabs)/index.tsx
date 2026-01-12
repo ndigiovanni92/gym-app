@@ -1,6 +1,6 @@
+import { Link } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Link } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -36,7 +36,7 @@ export default function TodayScreen() {
 
       const { data: programData, error: programError } = await supabase
         .from('user_programs')
-        .select('id, program_id, programs ( id, name )')
+        .select('id, program_id, programs ( id, title )')
         .eq('active', true)
         .maybeSingle();
 
