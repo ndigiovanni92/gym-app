@@ -1,98 +1,188 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Link } from 'expo-router';
 
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { supabase } from '@/src/lib/supabase';
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+type ActiveProgram = {
+  id: string;
+  program_id: string;
+  programs?: {
+    id: string;
+    name?: string | null;
+  } | null;
+};
+
+type WorkoutTemplate = {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+};
+
+export default function TodayScreen() {
+  const [activeProgram, setActiveProgram] = useState<ActiveProgram | null>(null);
+  const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadToday = async () => {
+      setLoading(true);
+      setErrorMessage(null);
+
+      const { data: programData, error: programError } = await supabase
+        .from('user_programs')
+        .select('id, program_id, programs ( id, name )')
+        .eq('active', true)
+        .maybeSingle();
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (programError) {
+        setErrorMessage(programError.message);
+        setActiveProgram(null);
+        setTemplates([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!programData) {
+        setActiveProgram(null);
+        setTemplates([]);
+        setLoading(false);
+        return;
+      }
+
+      setActiveProgram(programData as ActiveProgram);
+
+      const { data: templateData, error: templateError } = await supabase
+        .from('workout_templates')
+        .select('*')
+        .eq('program_id', programData.program_id)
+        .order('id', { ascending: true });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (templateError) {
+        setErrorMessage(templateError.message);
+        setTemplates([]);
+      } else {
+        setTemplates((templateData as WorkoutTemplate[]) ?? []);
+      }
+
+      setLoading(false);
+    };
+
+    loadToday();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <ThemedText type="title">Today</ThemedText>
+        <ThemedText type="subtitle">Your next workout is ready.</ThemedText>
+      </View>
+
+      {loading ? (
+        <ActivityIndicator size="large" />
+      ) : errorMessage ? (
+        <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
+      ) : !activeProgram ? (
+        <ThemedText>No active program found.</ThemedText>
+      ) : (
+        <View style={styles.content}>
+          <View style={styles.programCard}>
+            <ThemedText type="defaultSemiBold">Active Program</ThemedText>
+            <ThemedText style={styles.programName}>
+              {activeProgram.programs?.name ?? 'Your Program'}
+            </ThemedText>
+          </View>
+
+          <View style={styles.section}>
+            <ThemedText type="defaultSemiBold">Workout Templates</ThemedText>
+            {templates.length === 0 ? (
+              <ThemedText style={styles.emptyText}>No templates found.</ThemedText>
+            ) : (
+              <View style={styles.templateList}>
+                {templates.map((template) => (
+                  <Link
+                    key={template.id}
+                    href={{
+                      pathname: '/workout/[templateId]',
+                      params: { templateId: template.id },
+                    }}
+                    asChild>
+                    <Pressable style={styles.templateCard}>
+                      <ThemedText type="defaultSemiBold">
+                        {template.name ?? template.title ?? `Template ${template.id}`}
+                      </ThemedText>
+                      <ThemedText style={styles.templateCta}>Start workout →</ThemedText>
+                    </Pressable>
+                  </Link>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  container: {
+    flex: 1,
+    padding: 24,
+    gap: 24,
+  },
+  header: {
     gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  content: {
+    gap: 24,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  programCard: {
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#f4f4f5',
+    gap: 4,
+  },
+  programName: {
+    fontSize: 18,
+  },
+  section: {
+    gap: 12,
+  },
+  templateList: {
+    gap: 12,
+  },
+  templateCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e4e4e7',
+    backgroundColor: '#fff',
+    gap: 8,
+  },
+  templateCta: {
+    color: '#2563eb',
+  },
+  emptyText: {
+    color: '#6b7280',
+  },
+  errorText: {
+    color: '#dc2626',
   },
 });
