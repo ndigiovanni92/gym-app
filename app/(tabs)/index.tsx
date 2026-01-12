@@ -11,7 +11,7 @@ type ActiveProgram = {
   program_id: string;
   programs?: {
     id: string;
-    name?: string | null;
+    title?: string | null;
   } | null;
 };
 
@@ -106,33 +106,28 @@ export default function TodayScreen() {
           <View style={styles.programCard}>
             <ThemedText type="defaultSemiBold">Active Program</ThemedText>
             <ThemedText style={styles.programName}>
-              {activeProgram.programs?.name ?? 'Your Program'}
+              {activeProgram.programs?.title ?? 'Your Program'}
             </ThemedText>
           </View>
 
           <View style={styles.section}>
-            <ThemedText type="defaultSemiBold">Workout Templates</ThemedText>
+            <ThemedText type="defaultSemiBold">Today&apos;s Workout</ThemedText>
             {templates.length === 0 ? (
-              <ThemedText style={styles.emptyText}>No templates found.</ThemedText>
+              <ThemedText style={styles.emptyText}>No workout found.</ThemedText>
             ) : (
-              <View style={styles.templateList}>
-                {templates.map((template) => (
-                  <Link
-                    key={template.id}
-                    href={{
-                      pathname: '/workout/[templateId]',
-                      params: { templateId: template.id },
-                    }}
-                    asChild>
-                    <Pressable style={styles.templateCard}>
-                      <ThemedText type="defaultSemiBold">
-                        {template.name ?? template.title ?? `Template ${template.id}`}
-                      </ThemedText>
-                      <ThemedText style={styles.templateCta}>Start workout →</ThemedText>
-                    </Pressable>
-                  </Link>
-                ))}
-              </View>
+              <Link
+                href={{
+                  pathname: '/workout/[templateId]',
+                  params: { templateId: templates[0].id },
+                }}
+                asChild>
+                <Pressable style={styles.templateCard}>
+                  <ThemedText type="defaultSemiBold">
+                    {templates[0].name ?? templates[0].title ?? `Template ${templates[0].id}`}
+                  </ThemedText>
+                  <ThemedText style={styles.templateCta}>View workout →</ThemedText>
+                </Pressable>
+              </Link>
             )}
           </View>
         </View>
@@ -163,9 +158,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   section: {
-    gap: 12,
-  },
-  templateList: {
     gap: 12,
   },
   templateCard: {
