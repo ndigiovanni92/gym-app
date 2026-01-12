@@ -22,7 +22,6 @@ type TemplateExercise = {
 
 type WorkoutTemplate = {
   id: string;
-  title?: string | null;
   name?: string | null;
   workout_template_exercises?: TemplateExercise[] | null;
 };
@@ -130,7 +129,7 @@ export default function WorkoutTemplateScreen() {
 
       const { data, error } = await supabase
         .from('workout_templates')
-        .select('id, title, name, workout_template_exercises ( *, exercises ( * ) )')
+        .select('id, name, workout_template_exercises ( *, exercises ( * ) )')
         .eq('id', templateId)
         .maybeSingle();
 
@@ -177,7 +176,7 @@ export default function WorkoutTemplateScreen() {
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
-        <ThemedText type="title">{template?.title ?? template?.name ?? 'Workout'}</ThemedText>
+        <ThemedText type="title">{template?.name ?? 'Workout'}</ThemedText>
         <ThemedText type="subtitle">Template {templateId ?? 'Unknown'}</ThemedText>
       </View>
       {loading ? (
