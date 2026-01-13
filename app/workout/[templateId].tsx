@@ -1,6 +1,6 @@
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -321,7 +321,12 @@ export default function WorkoutTemplateScreen() {
 
     const { data: sessionData, error: sessionError } = await supabase
       .from('workout_sessions')
-      .insert({ workout_template_id: templateId })
+      .insert({
+        workout_template_id: templateId,
+        started_at: new Date().toISOString(),
+        status: "in_progress",
+        
+      })
       .select('id')
       .single();
 
