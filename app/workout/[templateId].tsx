@@ -13,7 +13,9 @@ type TemplateExercise = {
   rep_range?: string | null;
   reps_min?: number | null;
   reps_max?: number | null;
+  exercise_id?: string | null; 
   exercises?: {
+    id?: string | null; 
     name?: string | null;
     title?: string | null;
   } | null;
@@ -28,7 +30,7 @@ type WorkoutTemplate = {
 
 type SetEntry = {
   key: string;
-  templateExerciseId: string;
+  exerciseId: string;
   setIndex: number;
   prescribedReps: string | null;
   prescribedWeight: number | null;
@@ -277,9 +279,21 @@ export default function WorkoutTemplateScreen() {
 
       Array.from({ length: sets }).forEach((_, setIndex) => {
         const key = `${exercise.id}-${setIndex}`;
+        const resolvedExerciseId =
+          exercise.exercise_id ?? exercise.exercises?.id;
+      
+        if (!resolvedExerciseId) {
+          console.warn(
+            "Missing exercise_id for template exercise",
+            exercise.id,
+            exercise
+          );
+          return;
+        }
+
         nextEntries[key] = {
           key,
-          templateExerciseId: exercise.id,
+          exerciseId: resolvedExerciseId,
           setIndex,
           prescribedReps: repsDisplay,
           prescribedWeight: targetWeight,
@@ -340,7 +354,7 @@ export default function WorkoutTemplateScreen() {
       .filter((entry) => entry.completed)
       .map((entry) => ({
         session_id: sessionData.id,
-        template_exercise_id: entry.templateExerciseId,
+        exercise_id: entry.exerciseId,
         set_number: entry.setIndex + 1,
         reps: entry.actualReps ? Number(entry.actualReps) : null,
         weight: entry.actualWeight ? Number(entry.actualWeight) : null,
