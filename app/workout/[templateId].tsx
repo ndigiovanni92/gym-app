@@ -339,8 +339,8 @@ export default function WorkoutTemplateScreen() {
     const payload = Object.values(setEntries)
       .filter((entry) => entry.completed)
       .map((entry) => ({
-        workout_session_id: sessionData.id,
-        workout_template_exercise_id: entry.templateExerciseId,
+        session_id: sessionData.id,
+        template_exercise_id: entry.templateExerciseId,
         set_number: entry.setIndex + 1,
         reps: entry.actualReps ? Number(entry.actualReps) : null,
         weight: entry.actualWeight ? Number(entry.actualWeight) : null,
