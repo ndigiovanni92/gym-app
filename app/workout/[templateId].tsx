@@ -341,10 +341,9 @@ export default function WorkoutTemplateScreen() {
       .map((entry) => ({
         workout_session_id: sessionData.id,
         workout_template_exercise_id: entry.templateExerciseId,
-        set_index: entry.setIndex + 1,
-        actual_reps: entry.actualReps ? Number(entry.actualReps) : null,
-        actual_weight: entry.actualWeight ? Number(entry.actualWeight) : null,
-        completed: entry.completed,
+        set_number: entry.setIndex + 1,
+        reps: entry.actualReps ? Number(entry.actualReps) : null,
+        weight: entry.actualWeight ? Number(entry.actualWeight) : null,
       }));
 
     const { error: logError } = await supabase.from('set_logs').insert(payload);
