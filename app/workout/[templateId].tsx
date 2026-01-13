@@ -658,12 +658,7 @@ export default function WorkoutTemplateScreen() {
     setMode('lifting');
     setCurrentSetIndex(0);
     resetLogs();
-    setWeight(70);
-    setReps(9);
-    setRestRemaining(0);
-    setRestTotal(0);
-    setRestPaused(false);
-    setRestFinished(false);
+    router.replace('/(tabs)');
   };
 
   const goToNextWorkout = () => {
