@@ -19,6 +19,15 @@ type TemplateSet = {
   restSeconds: number;
 };
 
+type TemplateExercise = {
+  id: string;
+  exercise_id?: string | null;
+  exercises?: {
+    id: string;
+    name?: string | null;
+  } | null;
+};
+
 type SetLog = {
   setNumber: number;
   weight: number;
@@ -58,6 +67,8 @@ const TEMPLATE_SETS: TemplateSet[] = [
 const EXERCISE_NAME = 'Incline DB Press';
 const DEFAULT_PREFILL_FROM_LAST_SET = true;
 const TIMER_ENDS_SHOWS_BUTTON = true;
+const INITIAL_WEIGHT = 70;
+const INITIAL_REPS = 9;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -66,17 +77,6 @@ const formatSeconds = (total: number) => {
   const minutes = Math.floor(safe / 60);
   const seconds = safe % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-};
-
-const useSetRunnerData = (_templateId?: string) => {
-  // Placeholder data source so we can swap in Supabase queries later.
-  return useMemo(
-    () => ({
-      exerciseName: EXERCISE_NAME,
-      templateSets: TEMPLATE_SETS,
-    }),
-    [],
-  );
 };
 
 const useSetRunnerLogger = () => {
@@ -172,7 +172,8 @@ const BigTimer = ({
   paused: boolean;
 }) => {
   const pulse = useRef(new Animated.Value(0)).current;
-  const progress = totalSeconds > 0 ? clamp(remainingSeconds / totalSeconds, 0, 1) : 0;
+  const progress =
+    totalSeconds > 0 ? clamp(1 - remainingSeconds / totalSeconds, 0, 1) : 0;
   const circleSize = 260;
   const strokeWidth = 10;
   const halfRotation = progress <= 0.5 ? progress * 360 : 180;
@@ -434,18 +435,20 @@ export default function WorkoutTemplateScreen() {
   const params = useLocalSearchParams<{ templateId?: string | string[] }>();
   const templateId = Array.isArray(params.templateId) ? params.templateId[0] : params.templateId;
   const router = useRouter();
-  const { exerciseName, templateSets } = useSetRunnerData(templateId);
+  const templateSets = TEMPLATE_SETS;
   const { logs, logSet, resetLogs } = useSetRunnerLogger();
 
   const [mode, setMode] = useState<'lifting' | 'rest' | 'done'>('lifting');
   const [currentSetIndex, setCurrentSetIndex] = useState(0);
-  const [weight, setWeight] = useState(70);
-  const [reps, setReps] = useState(9);
+  const [weight, setWeight] = useState(INITIAL_WEIGHT);
+  const [reps, setReps] = useState(INITIAL_REPS);
   const [restRemaining, setRestRemaining] = useState(0);
   const [restTotal, setRestTotal] = useState(0);
   const [restPaused, setRestPaused] = useState(false);
   const [restFinished, setRestFinished] = useState(false);
   const [nextTemplateId, setNextTemplateId] = useState<string | null>(null);
+  const [templateExercises, setTemplateExercises] = useState<TemplateExercise[]>([]);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -453,6 +456,10 @@ export default function WorkoutTemplateScreen() {
   const isLastSet = currentSetIndex === totalSets - 1;
   const currentTemplateSet = templateSets[currentSetIndex];
   const lastLog = logs.at(-1);
+  const totalExercises = Math.max(templateExercises.length, 1);
+  const isLastExercise = currentExerciseIndex >= totalExercises - 1;
+  const currentExercise = templateExercises[currentExerciseIndex];
+  const exerciseName = currentExercise?.exercises?.name ?? EXERCISE_NAME;
 
   const targetLine = useMemo(() => {
     return `${currentTemplateSet?.targetReps ?? ''} reps`;
@@ -544,6 +551,65 @@ export default function WorkoutTemplateScreen() {
     };
   }, [templateId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadExercises = async () => {
+      if (!templateId) {
+        if (isMounted) {
+          setTemplateExercises([]);
+          setCurrentExerciseIndex(0);
+        }
+        return;
+      }
+
+      setTemplateExercises([]);
+      setCurrentExerciseIndex(0);
+      resetLogs();
+      setCurrentSetIndex(0);
+      setWeight(INITIAL_WEIGHT);
+      setReps(INITIAL_REPS);
+      setRestRemaining(0);
+      setRestTotal(0);
+      setRestPaused(false);
+      setRestFinished(false);
+      setMode('lifting');
+
+      const selectColumns = 'id, exercise_id, exercises ( id, name )';
+
+      const { data, error } = await supabase
+        .from('workout_template_exercises')
+        .select(selectColumns)
+        .eq('template_id', templateId);
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!error) {
+        setTemplateExercises((data as TemplateExercise[]) ?? []);
+        return;
+      }
+
+      const { data: fallbackData } = await supabase
+        .from('workout_template_exercises')
+        .select(selectColumns)
+        .eq('workout_template_id', templateId);
+
+      if (!isMounted) {
+        return;
+      }
+
+      setTemplateExercises((fallbackData as TemplateExercise[]) ?? []);
+    };
+
+    void loadExercises();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [templateId]);
+
   const prefillForNextSet = () => {
     if (!DEFAULT_PREFILL_FROM_LAST_SET || !lastLog) {
       return;
@@ -574,6 +640,18 @@ export default function WorkoutTemplateScreen() {
     setRestTotal(restSeconds);
     setRestRemaining(restSeconds);
     setMode('rest');
+  };
+
+  const resetForExercise = () => {
+    resetLogs();
+    setCurrentSetIndex(0);
+    setWeight(INITIAL_WEIGHT);
+    setReps(INITIAL_REPS);
+    setRestRemaining(0);
+    setRestTotal(0);
+    setRestPaused(false);
+    setRestFinished(false);
+    setMode('lifting');
   };
 
   const startNextSet = () => {
@@ -612,6 +690,16 @@ export default function WorkoutTemplateScreen() {
     router.replace('/(tabs)');
   };
 
+  const goToNextExerciseOrWorkout = () => {
+    if (!isLastExercise) {
+      setCurrentExerciseIndex((prev) => prev + 1);
+      resetForExercise();
+      return;
+    }
+
+    goToNextWorkout();
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
@@ -635,10 +723,14 @@ export default function WorkoutTemplateScreen() {
             <Pressable
               accessibilityRole="button"
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-              onPress={goToNextWorkout}
+              onPress={goToNextExerciseOrWorkout}
             >
               <Text style={styles.primaryBtnText}>
-                {nextTemplateId ? 'Next Workout' : 'Back to Today'}
+                {!isLastExercise
+                  ? 'Next Exercise'
+                  : nextTemplateId
+                  ? 'Next Workout'
+                  : 'Back to Today'}
               </Text>
             </Pressable>
           </View>
