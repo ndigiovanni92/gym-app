@@ -1,536 +1,684 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+  Vibration,
+} from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { supabase } from '@/src/lib/supabase';
-
-type TemplateExercise = {
-  id: string;
-  sets?: number | null;
-  reps?: number | null;
-  rep_range?: string | null;
-  reps_min?: number | null;
-  reps_max?: number | null;
-  exercise_id?: string | null; 
-  exercises?: {
-    id?: string | null; 
-    name?: string | null;
-    title?: string | null;
-  } | null;
-  [key: string]: unknown;
+type TemplateSet = {
+  targetReps: string;
+  restSeconds: number;
 };
 
-type WorkoutTemplate = {
-  id: string;
-  name?: string | null;
-  workout_template_exercises?: TemplateExercise[] | null;
+type SetLog = {
+  setNumber: number;
+  weight: number;
+  reps: number;
 };
 
-type SetEntry = {
-  key: string;
-  exerciseId: string;
-  setIndex: number;
-  prescribedReps: string | null;
-  prescribedWeight: number | null;
-  actualReps: string;
-  actualWeight: string;
-  completed: boolean;
+type RestTimerScreenProps = {
+  nextSetLabel: string;
+  remainingSeconds: number;
+  paused: boolean;
+  lastLog?: SetLog;
+  restFinished: boolean;
+  onAddRest: (seconds: number) => void;
+  onSkipRest: () => void;
+  onTogglePause: () => void;
+  onStartNextSet: () => void;
 };
 
-const resolveNumericOrder = (exercise: TemplateExercise) => {
-  const candidate =
-    exercise.order_index ??
-    exercise.sort_order ??
-    exercise.position ??
-    exercise.sequence ??
-    exercise.order;
-
-  return typeof candidate === 'number' ? candidate : null;
+type SetInputCardProps = {
+  targetLine: string;
+  lastLog?: SetLog;
+  weight: number;
+  reps: number;
+  onChangeWeight: (value: number) => void;
+  onChangeReps: (value: number) => void;
+  onCompleteSet: () => void;
 };
 
-const resolveTargetWeight = (exercise: TemplateExercise) => {
-  const candidate =
-    exercise.target_weight ??
-    exercise.prescribed_weight ??
-    exercise.weight ??
-    exercise.load ??
-    exercise.target_load;
-  return typeof candidate === 'number' ? candidate : null;
+const TEMPLATE_SETS: TemplateSet[] = [
+  { targetReps: '8–10', restSeconds: 90 },
+  { targetReps: '8–10', restSeconds: 90 },
+  { targetReps: '8–10', restSeconds: 90 },
+  { targetReps: '8–10', restSeconds: 90 },
+];
+
+const EXERCISE_NAME = 'Incline DB Press';
+const DEFAULT_PREFILL_FROM_LAST_SET = true;
+const TIMER_ENDS_SHOWS_BUTTON = true;
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const formatSeconds = (total: number) => {
+  const safe = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const resolveSetCount = (exercise: TemplateExercise) => {
-  const candidate =
-    exercise.sets ??
-    exercise.set_count ??
-    exercise.sets_count ??
-    exercise.total_sets ??
-    exercise.total_set_count;
-
-  return typeof candidate === 'number' && candidate > 0 ? candidate : null;
+const useSetRunnerData = (_templateId?: string) => {
+  // Placeholder data source so we can swap in Supabase queries later.
+  return useMemo(
+    () => ({
+      exerciseName: EXERCISE_NAME,
+      templateSets: TEMPLATE_SETS,
+    }),
+    [],
+  );
 };
 
-const resolveRepsDisplay = (exercise: TemplateExercise) => {
-  const reps =
-    typeof exercise.reps === 'number'
-      ? exercise.reps
-      : typeof exercise.rep_count === 'number'
-        ? exercise.rep_count
-        : null;
-  const repsMin =
-    typeof exercise.reps_min === 'number'
-      ? exercise.reps_min
-      : typeof exercise.rep_min === 'number'
-        ? exercise.rep_min
-        : null;
-  const repsMax =
-    typeof exercise.reps_max === 'number'
-      ? exercise.reps_max
-      : typeof exercise.rep_max === 'number'
-        ? exercise.rep_max
-        : null;
-  const repRange = typeof exercise.rep_range === 'string' ? exercise.rep_range : null;
+const useSetRunnerLogger = () => {
+  const [logs, setLogs] = useState<SetLog[]>([]);
 
-  if (reps !== null) {
-    return `${reps}`;
+  const logSet = async (nextLog: SetLog) => {
+    // Placeholder data layer; replace with Supabase insert when ready.
+    setLogs((prev) => [...prev, nextLog]);
+  };
+
+  const resetLogs = () => setLogs([]);
+
+  return { logs, logSet, resetLogs };
+};
+
+const SetInputCard = ({
+  targetLine,
+  lastLog,
+  weight,
+  reps,
+  onChangeWeight,
+  onChangeReps,
+  onCompleteSet,
+}: SetInputCardProps) => (
+  <>
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Target</Text>
+      <Text style={styles.cardBig}>{targetLine}</Text>
+      {lastLog ? (
+        <Text style={styles.cardMuted}>
+          Last set: {lastLog.weight} lbs × {lastLog.reps}
+        </Text>
+      ) : null}
+    </View>
+    <View style={styles.card}>
+      <View style={styles.statsGrid}>
+        <StatStepper
+          label="Weight"
+          value={weight}
+          unit="lbs"
+          onDec={() => onChangeWeight(clamp(weight - 5, 0, 500))}
+          onInc={() => onChangeWeight(clamp(weight + 5, 0, 500))}
+        />
+        <StatStepper
+          label="Reps"
+          value={reps}
+          onDec={() => onChangeReps(clamp(reps - 1, 0, 100))}
+          onInc={() => onChangeReps(clamp(reps + 1, 0, 100))}
+        />
+      </View>
+    </View>
+    <Pressable
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+      onPress={onCompleteSet}
+    >
+      <Text style={styles.primaryBtnText}>Complete Set</Text>
+    </Pressable>
+  </>
+);
+
+const CompletedSetsList = ({ logs }: { logs: SetLog[] }) => {
+  if (logs.length === 0) {
+    return null;
   }
-  if (repRange) {
-    return repRange;
-  }
-  if (repsMin !== null || repsMax !== null) {
-    const min = repsMin !== null ? `${repsMin}` : '';
-    const max = repsMax !== null ? `${repsMax}` : '';
-    return [min, max].filter(Boolean).join('-');
-  }
-  return null;
-};
-
-const formatPrescription = (exercise: TemplateExercise) => {
-  const sets = resolveSetCount(exercise);
-  const repsDisplay = resolveRepsDisplay(exercise);
-
-  if (sets !== null && repsDisplay) {
-    return `${sets} × ${repsDisplay}`;
-  }
-  if (sets !== null) {
-    return `${sets} sets`;
-  }
-  if (repsDisplay) {
-    return `${repsDisplay} reps`;
-  }
-  return 'Prescription not specified';
-};
-
-type ExerciseCardProps = {
-  index: number;
-  exercise: TemplateExercise;
-  setEntries: Record<string, SetEntry>;
-  onUpdateSet: (key: string, updates: Partial<SetEntry>) => void;
-};
-
-function ExerciseCard({ index, exercise, setEntries, onUpdateSet }: ExerciseCardProps) {
-  const name = exercise.exercises?.name ?? exercise.exercises?.title ?? `Exercise ${index + 1}`;
-  const sets = resolveSetCount(exercise) ?? 1;
-  const repsDisplay = resolveRepsDisplay(exercise);
-  const targetWeight = resolveTargetWeight(exercise);
 
   return (
-    <View style={styles.exerciseCard}>
-      <ThemedText type="defaultSemiBold">
-        {index + 1}. {name}
-      </ThemedText>
-      <ThemedText style={styles.exerciseMeta}>{formatPrescription(exercise)}</ThemedText>
-      <View style={styles.setList}>
-        {Array.from({ length: sets }).map((_, setIndex) => {
-          const key = `${exercise.id}-${setIndex}`;
-          const entry = setEntries[key];
-          const setLabel = `Set ${setIndex + 1}`;
-
-          return (
-            <View key={key} style={[styles.setRow, entry?.completed ? styles.setRowCompleted : null]}>
-              <View style={styles.setRowHeader}>
-                <ThemedText type="defaultSemiBold">{setLabel}</ThemedText>
-                <ThemedText style={styles.setPrescription}>
-                  {repsDisplay ? `${repsDisplay} reps` : 'Reps not set'}
-                  {targetWeight !== null ? ` • ${targetWeight} lb` : ''}
-                </ThemedText>
-              </View>
-              <View style={styles.setRowInputs}>
-                <View style={styles.inputGroup}>
-                  <ThemedText style={styles.inputLabel}>Reps</ThemedText>
-                  <TextInput
-                    style={styles.input}
-                    value={entry?.actualReps ?? ''}
-                    placeholder="0"
-                    keyboardType="numeric"
-                    onChangeText={(value) => onUpdateSet(key, { actualReps: value })}
-                  />
-                </View>
-                <View style={styles.inputGroup}>
-                  <ThemedText style={styles.inputLabel}>Weight</ThemedText>
-                  <TextInput
-                    style={styles.input}
-                    value={entry?.actualWeight ?? ''}
-                    placeholder="0"
-                    keyboardType="numeric"
-                    onChangeText={(value) => onUpdateSet(key, { actualWeight: value })}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: entry?.completed ?? false }}
-                  onPress={() => onUpdateSet(key, { completed: !(entry?.completed ?? false) })}
-                  style={[styles.checkbox, entry?.completed ? styles.checkboxChecked : null]}
-                >
-                  <ThemedText style={styles.checkboxText}>
-                    {entry?.completed ? '✓' : ''}
-                  </ThemedText>
-                </Pressable>
-              </View>
-            </View>
-          );
-        })}
+    <View style={[styles.card, styles.completedCard]}>
+      <Text style={styles.cardTitle}>Completed</Text>
+      <View style={styles.completedList}>
+        {logs.map((log) => (
+          <View key={log.setNumber} style={styles.logRow}>
+            <Text style={styles.logLeft}>Set {log.setNumber}</Text>
+            <Text style={styles.logRight}>
+              {log.weight} × {log.reps}
+            </Text>
+          </View>
+        ))}
       </View>
     </View>
   );
-}
+};
+
+const BigTimer = ({ remainingSeconds, paused }: { remainingSeconds: number; paused: boolean }) => {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (paused) {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [paused, pulse]);
+
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] });
+
+  return (
+    <View style={styles.timerWrap}>
+      <Animated.View style={[styles.timerCircle, { transform: [{ scale }] }]}>
+        <Text style={styles.timerText}>{formatSeconds(remainingSeconds)}</Text>
+        <Text style={styles.timerHint}>{paused ? 'Paused' : 'Resting'}</Text>
+      </Animated.View>
+    </View>
+  );
+};
+
+const RestTimerScreen = ({
+  nextSetLabel,
+  remainingSeconds,
+  paused,
+  lastLog,
+  restFinished,
+  onAddRest,
+  onSkipRest,
+  onTogglePause,
+  onStartNextSet,
+}: RestTimerScreenProps) => (
+  <SafeAreaView style={styles.restSafe}>
+    <View style={styles.restContainer}>
+      <View style={styles.restHeader}>
+        <Text style={styles.restTitle}>Rest Break</Text>
+        <Text style={styles.restSubtitle}>{nextSetLabel}</Text>
+      </View>
+
+      <View style={styles.restSpacer} />
+
+      <BigTimer remainingSeconds={remainingSeconds} paused={paused} />
+
+      {lastLog ? (
+        <View style={styles.restMeta}>
+          <Text style={styles.restMetaText}>
+            Last set: {lastLog.weight} lbs × {lastLog.reps}
+          </Text>
+        </View>
+      ) : null}
+
+      <View style={styles.restActions}>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.restChip, pressed && styles.btnPressed]}
+          onPress={() => onAddRest(15)}
+        >
+          <Text style={styles.restChipText}>+15s</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.restChip, pressed && styles.btnPressed]}
+          onPress={() => onAddRest(30)}
+        >
+          <Text style={styles.restChipText}>+30s</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.restChip, pressed && styles.btnPressed]}
+          onPress={onSkipRest}
+        >
+          <Text style={styles.restChipText}>Skip</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.restChip, pressed && styles.btnPressed]}
+          onPress={onTogglePause}
+        >
+          <Text style={styles.restChipText}>{paused ? 'Resume' : 'Pause'}</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.restFooterSpacer} />
+
+      <Pressable
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.restPrimaryBtn,
+          pressed && styles.btnPressed,
+          !restFinished && styles.primaryBtnDisabled,
+        ]}
+        disabled={!restFinished}
+        onPress={onStartNextSet}
+      >
+        <Text style={styles.restPrimaryBtnText}>Start Next Set</Text>
+      </Pressable>
+
+      <View style={styles.restLinkSpacer} />
+      <Pressable
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.linkBtn, pressed && styles.btnPressed]}
+        onPress={onStartNextSet}
+      >
+        <Text style={styles.restLinkText}>Go now (ignore rest)</Text>
+      </Pressable>
+    </View>
+  </SafeAreaView>
+);
+
+const StatStepper = ({
+  label,
+  value,
+  unit,
+  onDec,
+  onInc,
+}: {
+  label: string;
+  value: number;
+  unit?: string;
+  onDec: () => void;
+  onInc: () => void;
+}) => {
+  const pop = useRef(new Animated.Value(0)).current;
+
+  const bump = () => {
+    pop.stopAnimation();
+    pop.setValue(0);
+    Animated.sequence([
+      Animated.timing(pop, { toValue: 1, duration: 90, useNativeDriver: true }),
+      Animated.timing(pop, { toValue: 0, duration: 140, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const scale = pop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] });
+
+  return (
+    <View style={styles.statWrap}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Animated.View style={[styles.statCircle, styles.statCircleBig, { transform: [{ scale }] }]}>
+        <Text style={styles.statValue}>{value}</Text>
+        {unit ? <Text style={styles.statUnit}>{unit}</Text> : null}
+      </Animated.View>
+      <View style={styles.statControls}>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.statBtn, pressed && styles.btnPressed]}
+          onPress={() => {
+            bump();
+            onDec();
+          }}
+        >
+          <Text style={styles.statBtnText}>−</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.statBtn, pressed && styles.btnPressed]}
+          onPress={() => {
+            bump();
+            onInc();
+          }}
+        >
+          <Text style={styles.statBtnText}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+};
 
 export default function WorkoutTemplateScreen() {
   const params = useLocalSearchParams<{ templateId?: string | string[] }>();
   const templateId = Array.isArray(params.templateId) ? params.templateId[0] : params.templateId;
-  const [template, setTemplate] = useState<WorkoutTemplate | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [setEntries, setSetEntries] = useState<Record<string, SetEntry>>({});
-  const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const { exerciseName, templateSets } = useSetRunnerData(templateId);
+  const { logs, logSet, resetLogs } = useSetRunnerLogger();
+
+  const [mode, setMode] = useState<'lifting' | 'rest' | 'done'>('lifting');
+  const [currentSetIndex, setCurrentSetIndex] = useState(0);
+  const [weight, setWeight] = useState(70);
+  const [reps, setReps] = useState(9);
+  const [restRemaining, setRestRemaining] = useState(0);
+  const [restTotal, setRestTotal] = useState(0);
+  const [restPaused, setRestPaused] = useState(false);
+  const [restFinished, setRestFinished] = useState(false);
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const totalSets = templateSets.length;
+  const isLastSet = currentSetIndex === totalSets - 1;
+  const currentTemplateSet = templateSets[currentSetIndex];
+  const lastLog = logs.at(-1);
+
+  const targetLine = useMemo(() => {
+    return `${currentTemplateSet?.targetReps ?? ''} reps`;
+  }, [currentTemplateSet]);
 
   useEffect(() => {
-    let isMounted = true;
+    if (mode !== 'rest') {
+      return;
+    }
 
-    const loadTemplate = async () => {
-      if (!templateId) {
-        setErrorMessage('Missing workout template.');
-        setLoading(false);
-        return;
-      }
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
 
-      setLoading(true);
-      setErrorMessage(null);
-
-      const { data, error } = await supabase
-        .from('workout_templates')
-        .select('id, name, workout_template_exercises ( *, exercises ( * ) )')
-        .eq('id', templateId)
-        .maybeSingle();
-
-      if (!isMounted) {
-        return;
-      }
-
-      if (error) {
-        setErrorMessage(error.message);
-        setTemplate(null);
-      } else {
-        setTemplate((data as WorkoutTemplate) ?? null);
-      }
-
-      setLoading(false);
-    };
-
-    loadTemplate();
+    intervalRef.current = setInterval(() => {
+      setRestRemaining((prev) => {
+        if (restPaused) {
+          return prev;
+        }
+        return prev <= 1 ? 0 : prev - 1;
+      });
+    }, 1000);
 
     return () => {
-      isMounted = false;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      intervalRef.current = null;
     };
-  }, [templateId]);
-
-  const orderedExercises = useMemo(() => {
-    const exercises = template?.workout_template_exercises ?? [];
-    return [...exercises].sort((a, b) => {
-      const aOrder = resolveNumericOrder(a);
-      const bOrder = resolveNumericOrder(b);
-
-      if (aOrder !== null && bOrder !== null) {
-        return aOrder - bOrder;
-      }
-      if (aOrder !== null) {
-        return -1;
-      }
-      if (bOrder !== null) {
-        return 1;
-      }
-      return 0;
-    });
-  }, [template?.workout_template_exercises]);
+  }, [mode, restPaused]);
 
   useEffect(() => {
-    if (orderedExercises.length === 0) {
-      setSetEntries({});
+    if (mode !== 'rest' || restRemaining !== 0 || restFinished) {
       return;
     }
 
-    const nextEntries: Record<string, SetEntry> = {};
-    orderedExercises.forEach((exercise) => {
-      const sets = resolveSetCount(exercise) ?? 1;
-      const repsDisplay = resolveRepsDisplay(exercise);
-      const targetWeight = resolveTargetWeight(exercise);
+    setRestFinished(true);
+    Vibration.vibrate(150);
 
-      Array.from({ length: sets }).forEach((_, setIndex) => {
-        const key = `${exercise.id}-${setIndex}`;
-        const resolvedExerciseId =
-          exercise.exercise_id ?? exercise.exercises?.id;
-      
-        if (!resolvedExerciseId) {
-          console.warn(
-            "Missing exercise_id for template exercise",
-            exercise.id,
-            exercise
-          );
-          return;
-        }
+    if (!TIMER_ENDS_SHOWS_BUTTON) {
+      startNextSet();
+    }
+  }, [mode, restRemaining, restFinished]);
 
-        nextEntries[key] = {
-          key,
-          exerciseId: resolvedExerciseId,
-          setIndex,
-          prescribedReps: repsDisplay,
-          prescribedWeight: targetWeight,
-          actualReps: '',
-          actualWeight: '',
-          completed: false,
-        };
-      });
-    });
-    setSetEntries(nextEntries);
-  }, [orderedExercises]);
-
-  const completedSetCount = useMemo(
-    () => Object.values(setEntries).filter((entry) => entry.completed).length,
-    [setEntries],
-  );
-
-  const handleUpdateSet = (key: string, updates: Partial<SetEntry>) => {
-    setSetEntries((prev) => {
-      const current = prev[key];
-      if (!current) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [key]: { ...current, ...updates },
-      };
-    });
+  const prefillForNextSet = () => {
+    if (!DEFAULT_PREFILL_FROM_LAST_SET || !lastLog) {
+      return;
+    }
+    setWeight(lastLog.weight);
+    setReps(lastLog.reps);
   };
 
-  const handleFinishWorkout = async () => {
-    if (!templateId || saving || completedSetCount === 0) {
+  const completeSet = () => {
+    if (reps <= 0 || weight < 0) {
       return;
     }
 
-    setSaving(true);
-    setErrorMessage(null);
-    setSaveMessage(null);
+    void logSet({
+      setNumber: currentSetIndex + 1,
+      weight,
+      reps,
+    });
 
-    const { data: sessionData, error: sessionError } = await supabase
-      .from('workout_sessions')
-      .insert({
-        workout_template_id: templateId,
-        started_at: new Date().toISOString(),
-        status: "in_progress",
-        
-      })
-      .select('id')
-      .single();
-
-    if (sessionError || !sessionData) {
-      setErrorMessage(sessionError?.message ?? 'Unable to start workout session.');
-      setSaving(false);
+    if (isLastSet) {
+      setMode('done');
       return;
     }
 
-    const payload = Object.values(setEntries)
-      .filter((entry) => entry.completed)
-      .map((entry) => ({
-        session_id: sessionData.id,
-        exercise_id: entry.exerciseId,
-        set_number: entry.setIndex + 1,
-        reps: entry.actualReps ? Number(entry.actualReps) : null,
-        weight: entry.actualWeight ? Number(entry.actualWeight) : null,
-      }));
+    setRestPaused(false);
+    setRestFinished(false);
+    const restSeconds = currentTemplateSet?.restSeconds ?? 90;
+    setRestTotal(restSeconds);
+    setRestRemaining(restSeconds);
+    setMode('rest');
+  };
 
-    const { error: logError } = await supabase.from('set_logs').insert(payload);
-
-    if (logError) {
-      setErrorMessage(logError.message);
-      setSaving(false);
+  const startNextSet = () => {
+    const nextIndex = currentSetIndex + 1;
+    if (nextIndex >= totalSets) {
+      setMode('done');
       return;
     }
 
-    setSaveMessage('Workout saved! Nice work.');
-    setSaving(false);
+    setCurrentSetIndex(nextIndex);
+    prefillForNextSet();
+    setRestRemaining(0);
+    setRestTotal(0);
+    setRestPaused(false);
+    setRestFinished(false);
+    setMode('lifting');
+  };
+
+  const addRest = (seconds: number) => {
+    setRestRemaining((prev) => clamp(prev + seconds, 0, 60 * 60));
+    setRestTotal((prev) => clamp(prev + seconds, 0, 60 * 60));
+    setRestFinished(false);
+  };
+
+  const skipRest = () => {
+    setRestRemaining(0);
+  };
+
+  const resetWorkout = () => {
+    setMode('lifting');
+    setCurrentSetIndex(0);
+    resetLogs();
+    setWeight(70);
+    setReps(9);
+    setRestRemaining(0);
+    setRestTotal(0);
+    setRestPaused(false);
+    setRestFinished(false);
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <View style={styles.header}>
-        <ThemedText type="title">{template?.name ?? 'Workout'}</ThemedText>
-        <ThemedText type="subtitle">Template {templateId ?? 'Unknown'}</ThemedText>
-      </View>
-      {loading ? (
-        <ActivityIndicator size="large" />
-      ) : errorMessage ? (
-        <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
-      ) : orderedExercises.length === 0 ? (
-        <ThemedText>No exercises found for this workout.</ThemedText>
-      ) : (
-        <>
-          <ScrollView contentContainerStyle={styles.exerciseList}>
-            {saveMessage ? <ThemedText style={styles.successText}>{saveMessage}</ThemedText> : null}
-            {orderedExercises.map((exercise, index) => (
-              <ExerciseCard
-                key={exercise.id}
-                index={index}
-                exercise={exercise}
-                setEntries={setEntries}
-                onUpdateSet={handleUpdateSet}
-              />
-            ))}
-          </ScrollView>
-          <View style={styles.footer}>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerText}>
+            <Text style={styles.title}>{exerciseName}</Text>
+            <Text style={styles.subtitle}>
+              Set {currentSetIndex + 1} of {totalSets}
+            </Text>
+          </View>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{mode.toUpperCase()}</Text>
+          </View>
+        </View>
+
+        {mode === 'done' ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Exercise Complete</Text>
+            <Text style={styles.cardMuted}>Nice work. Here’s what you logged:</Text>
+            <CompletedSetsList logs={logs} />
             <Pressable
-              onPress={handleFinishWorkout}
-              disabled={saving || completedSetCount === 0}
-              style={[
-                styles.finishButton,
-                saving || completedSetCount === 0 ? styles.finishButtonDisabled : null,
-              ]}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+              onPress={resetWorkout}
             >
-              <ThemedText style={styles.finishButtonText}>
-                {saving ? 'Saving...' : `Finish Workout (${completedSetCount})`}
-              </ThemedText>
+              <Text style={styles.primaryBtnText}>Reset Prototype</Text>
             </Pressable>
           </View>
-        </>
-      )}
-    </ThemedView>
+        ) : (
+          <>
+            <SetInputCard
+              targetLine={targetLine}
+              lastLog={lastLog}
+              weight={weight}
+              reps={reps}
+              onChangeWeight={setWeight}
+              onChangeReps={setReps}
+              onCompleteSet={completeSet}
+            />
+            <CompletedSetsList logs={logs} />
+          </>
+        )}
+
+        <Modal transparent={false} visible={mode === 'rest'} animationType="slide">
+          <RestTimerScreen
+            nextSetLabel={`Next: Set ${currentSetIndex + 2} of ${totalSets}`}
+            remainingSeconds={restRemaining}
+            paused={restPaused}
+            lastLog={lastLog}
+            restFinished={restFinished}
+            onAddRest={addRest}
+            onSkipRest={skipRest}
+            onTogglePause={() => setRestPaused((prev) => !prev)}
+            onStartNextSet={startNextSet}
+          />
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    gap: 16,
-  },
+  safe: { flex: 1, backgroundColor: '#0B1220' },
+  container: { flex: 1, padding: 16, gap: 12 },
   header: {
-    gap: 8,
-  },
-  exerciseList: {
-    gap: 12,
-    paddingBottom: 140,
-  },
-  exerciseCard: {
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e4e4e7',
-    backgroundColor: '#fff',
-    gap: 6,
-  },
-  exerciseMeta: {
-    color: '#6b7280',
-  },
-  setList: {
-    gap: 12,
-    marginTop: 8,
-  },
-  setRow: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
-    gap: 10,
-  },
-  setRowCompleted: {
-    borderColor: '#22c55e',
-    backgroundColor: '#f0fdf4',
-  },
-  setRowHeader: {
-    gap: 4,
-  },
-  setPrescription: {
-    color: '#6b7280',
-  },
-  setRowInputs: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingBottom: 6,
   },
-  inputGroup: {
-    flex: 1,
-    gap: 4,
-  },
-  inputLabel: {
-    color: '#6b7280',
-    fontSize: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
+  headerText: { flex: 1 },
+  title: { fontSize: 22, fontWeight: '900', color: '#FFFFFF' },
+  subtitle: { fontSize: 14, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  badge: {
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  checkbox: {
-    width: 36,
-    height: 36,
+  badgeText: { fontSize: 12, fontWeight: '900', color: 'rgba(255,255,255,0.85)' },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#9ca3af',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  cardTitle: { fontSize: 13, fontWeight: '900', color: 'rgba(255,255,255,0.85)' },
+  cardBig: { fontSize: 22, fontWeight: '900', color: '#FFFFFF', marginTop: 6 },
+  cardMuted: { fontSize: 13, color: 'rgba(255,255,255,0.70)', marginTop: 6 },
+  primaryBtn: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#16A34A',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    marginTop: 12,
   },
-  checkboxChecked: {
-    borderColor: '#22c55e',
-    backgroundColor: '#22c55e',
-  },
-  checkboxText: {
-    color: '#fff',
-    fontSize: 18,
-  },
-  footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-  },
-  finishButton: {
-    backgroundColor: '#111827',
-    paddingVertical: 14,
-    borderRadius: 12,
+  primaryBtnDisabled: { opacity: 0.5 },
+  primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  logRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
   },
-  finishButtonDisabled: {
-    backgroundColor: '#9ca3af',
+  logLeft: { fontSize: 14, fontWeight: '900', color: 'rgba(255,255,255,0.75)' },
+  logRight: { fontSize: 14, fontWeight: '900', color: '#FFFFFF' },
+  completedCard: { paddingVertical: 12 },
+  completedList: { marginTop: 8 },
+  restSafe: { flex: 1, backgroundColor: '#0B1220' },
+  restContainer: { flex: 1, padding: 20 },
+  restHeader: { alignItems: 'center', paddingTop: 8 },
+  restTitle: { fontSize: 20, fontWeight: '900', color: '#FFFFFF' },
+  restSubtitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 6,
   },
-  finishButtonText: {
-    color: '#fff',
-    fontSize: 16,
+  restSpacer: { height: 24 },
+  timerWrap: { alignItems: 'center', justifyContent: 'center' },
+  timerCircle: {
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 10,
+    borderColor: '#2563EB',
   },
-  errorText: {
-    color: '#dc2626',
+  timerText: { fontSize: 56, fontWeight: '900', color: '#FFFFFF', textAlign: 'center' },
+  timerHint: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 6,
   },
-  successText: {
-    color: '#16a34a',
-    fontWeight: '600',
+  restMeta: {
+    alignSelf: 'center',
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
+  restMetaText: { fontSize: 13, fontWeight: '800', color: 'rgba(255,255,255,0.85)' },
+  restActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  restChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  restChipText: { fontSize: 14, fontWeight: '900', color: '#FFFFFF' },
+  restFooterSpacer: { flex: 1 },
+  restPrimaryBtn: {
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restPrimaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  restLinkText: { fontSize: 13, fontWeight: '900', color: 'rgba(255,255,255,0.85)' },
+  restLinkSpacer: { height: 10 },
+  linkBtn: {
+    alignSelf: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  statWrap: { alignItems: 'center', flex: 1 },
+  statLabel: { fontSize: 13, fontWeight: '900', color: 'rgba(255,255,255,0.75)', marginBottom: 10 },
+  statCircle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 10,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  statCircleBig: { width: 170, height: 170, borderRadius: 85 },
+  statValue: { fontSize: 44, fontWeight: '900', color: '#FFFFFF' },
+  statUnit: { fontSize: 14, fontWeight: '900', color: 'rgba(255,255,255,0.65)', marginTop: 2 },
+  statControls: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  statBtn: {
+    width: 56,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  statBtnText: { fontSize: 22, fontWeight: '900', color: '#FFFFFF' },
+  statsGrid: { flexDirection: 'row', gap: 16, justifyContent: 'space-between' },
+  btnPressed: { transform: [{ scale: 0.99 }], opacity: 0.95 },
 });
