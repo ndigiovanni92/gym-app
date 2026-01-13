@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -7,13 +7,23 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Vibration,
 } from 'react-native';
 
+import { supabase } from '@/src/lib/supabase';
+
 type TemplateSet = {
   targetReps: string;
   restSeconds: number;
+};
+
+type TemplateExercise = {
+  id: string;
+  exercises?: {
+    name?: string | null;
+  } | null;
 };
 
 type SetLog = {
@@ -25,6 +35,7 @@ type SetLog = {
 type RestTimerScreenProps = {
   nextSetLabel: string;
   remainingSeconds: number;
+  totalSeconds: number;
   paused: boolean;
   lastLog?: SetLog;
   restFinished: boolean;
@@ -64,14 +75,51 @@ const formatSeconds = (total: number) => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const useSetRunnerData = (_templateId?: string) => {
-  // Placeholder data source so we can swap in Supabase queries later.
+const useSetRunnerData = (templateId?: string) => {
+  const [templateExercises, setTemplateExercises] = useState<TemplateExercise[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadExercises = async () => {
+      if (!templateId) {
+        if (isMounted) {
+          setTemplateExercises([]);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('workout_template_exercises')
+        .select('id, exercises ( name )')
+        .eq('template_id', templateId)
+        .order('id', { ascending: true });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        setTemplateExercises([]);
+        return;
+      }
+
+      setTemplateExercises((data ?? []) as TemplateExercise[]);
+    };
+
+    void loadExercises();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [templateId]);
+
   return useMemo(
     () => ({
-      exerciseName: EXERCISE_NAME,
+      templateExercises,
       templateSets: TEMPLATE_SETS,
     }),
-    [],
+    [templateExercises],
   );
 };
 
@@ -115,12 +163,14 @@ const SetInputCard = ({
           unit="lbs"
           onDec={() => onChangeWeight(clamp(weight - 5, 0, 500))}
           onInc={() => onChangeWeight(clamp(weight + 5, 0, 500))}
+          onChangeValue={onChangeWeight}
         />
         <StatStepper
           label="Reps"
           value={reps}
           onDec={() => onChangeReps(clamp(reps - 1, 0, 100))}
           onInc={() => onChangeReps(clamp(reps + 1, 0, 100))}
+          onChangeValue={onChangeReps}
         />
       </View>
     </View>
@@ -156,8 +206,23 @@ const CompletedSetsList = ({ logs }: { logs: SetLog[] }) => {
   );
 };
 
-const BigTimer = ({ remainingSeconds, paused }: { remainingSeconds: number; paused: boolean }) => {
+const BigTimer = ({
+  remainingSeconds,
+  totalSeconds,
+  paused,
+}: {
+  remainingSeconds: number;
+  totalSeconds: number;
+  paused: boolean;
+}) => {
   const pulse = useRef(new Animated.Value(0)).current;
+  const progress = totalSeconds > 0 ? clamp(remainingSeconds / totalSeconds, 0, 1) : 0;
+  const circleSize = 260;
+  const strokeWidth = 10;
+  const halfRotation = progress <= 0.5 ? progress * 360 : 180;
+  const secondHalfRotation = progress > 0.5 ? (progress - 0.5) * 360 : 0;
+  const showFirstHalf = progress > 0;
+  const showSecondHalf = progress > 0.5;
 
   useEffect(() => {
     if (paused) {
@@ -182,6 +247,57 @@ const BigTimer = ({ remainingSeconds, paused }: { remainingSeconds: number; paus
   return (
     <View style={styles.timerWrap}>
       <Animated.View style={[styles.timerCircle, { transform: [{ scale }] }]}>
+        <View
+          style={[
+            styles.timerRing,
+            {
+              width: circleSize,
+              height: circleSize,
+              borderRadius: circleSize / 2,
+              borderWidth: strokeWidth,
+            },
+          ]}
+        />
+        <View style={[styles.timerProgressWrap, { width: circleSize, height: circleSize }]}>
+          <View style={[styles.timerHalf, styles.timerHalfRight, !showFirstHalf && styles.hidden]}>
+            <View
+              style={[
+                styles.timerProgress,
+                styles.timerProgressRight,
+                {
+                  width: circleSize,
+                  height: circleSize,
+                  borderRadius: circleSize / 2,
+                  transform: [{ rotateZ: `${halfRotation - 90}deg` }],
+                },
+              ]}
+            />
+          </View>
+          <View style={[styles.timerHalf, !showSecondHalf && styles.hidden]}>
+            <View
+              style={[
+                styles.timerProgress,
+                styles.timerProgressLeft,
+                {
+                  width: circleSize,
+                  height: circleSize,
+                  borderRadius: circleSize / 2,
+                  transform: [{ rotateZ: `${secondHalfRotation - 90}deg` }],
+                },
+              ]}
+            />
+          </View>
+        </View>
+        <View
+          style={[
+            styles.timerInner,
+            {
+              width: circleSize - strokeWidth * 2,
+              height: circleSize - strokeWidth * 2,
+              borderRadius: (circleSize - strokeWidth * 2) / 2,
+            },
+          ]}
+        />
         <Text style={styles.timerText}>{formatSeconds(remainingSeconds)}</Text>
         <Text style={styles.timerHint}>{paused ? 'Paused' : 'Resting'}</Text>
       </Animated.View>
@@ -192,6 +308,7 @@ const BigTimer = ({ remainingSeconds, paused }: { remainingSeconds: number; paus
 const RestTimerScreen = ({
   nextSetLabel,
   remainingSeconds,
+  totalSeconds,
   paused,
   lastLog,
   restFinished,
@@ -209,7 +326,7 @@ const RestTimerScreen = ({
 
       <View style={styles.restSpacer} />
 
-      <BigTimer remainingSeconds={remainingSeconds} paused={paused} />
+      <BigTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} paused={paused} />
 
       {lastLog ? (
         <View style={styles.restMeta}>
@@ -283,14 +400,21 @@ const StatStepper = ({
   unit,
   onDec,
   onInc,
+  onChangeValue,
 }: {
   label: string;
   value: number;
   unit?: string;
   onDec: () => void;
   onInc: () => void;
+  onChangeValue: (nextValue: number) => void;
 }) => {
   const pop = useRef(new Animated.Value(0)).current;
+  const [draftValue, setDraftValue] = useState(String(value));
+
+  useEffect(() => {
+    setDraftValue(String(value));
+  }, [value]);
 
   const bump = () => {
     pop.stopAnimation();
@@ -307,7 +431,21 @@ const StatStepper = ({
     <View style={styles.statWrap}>
       <Text style={styles.statLabel}>{label}</Text>
       <Animated.View style={[styles.statCircle, styles.statCircleBig, { transform: [{ scale }] }]}>
-        <Text style={styles.statValue}>{value}</Text>
+        <TextInput
+          value={draftValue}
+          onChangeText={(text) => {
+            const cleaned = text.replace(/[^\d]/g, '');
+            setDraftValue(cleaned);
+            const numericValue = cleaned.length === 0 ? 0 : Number(cleaned);
+            if (Number.isFinite(numericValue)) {
+              onChangeValue(numericValue);
+            }
+          }}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          selectTextOnFocus
+          style={styles.statInput}
+        />
         {unit ? <Text style={styles.statUnit}>{unit}</Text> : null}
       </Animated.View>
       <View style={styles.statControls}>
@@ -339,17 +477,20 @@ const StatStepper = ({
 export default function WorkoutTemplateScreen() {
   const params = useLocalSearchParams<{ templateId?: string | string[] }>();
   const templateId = Array.isArray(params.templateId) ? params.templateId[0] : params.templateId;
-  const { exerciseName, templateSets } = useSetRunnerData(templateId);
+  const router = useRouter();
+  const { templateExercises, templateSets } = useSetRunnerData(templateId);
   const { logs, logSet, resetLogs } = useSetRunnerLogger();
 
   const [mode, setMode] = useState<'lifting' | 'rest' | 'done'>('lifting');
   const [currentSetIndex, setCurrentSetIndex] = useState(0);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [weight, setWeight] = useState(70);
   const [reps, setReps] = useState(9);
   const [restRemaining, setRestRemaining] = useState(0);
   const [restTotal, setRestTotal] = useState(0);
   const [restPaused, setRestPaused] = useState(false);
   const [restFinished, setRestFinished] = useState(false);
+  const [nextTemplateId, setNextTemplateId] = useState<string | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -357,6 +498,9 @@ export default function WorkoutTemplateScreen() {
   const isLastSet = currentSetIndex === totalSets - 1;
   const currentTemplateSet = templateSets[currentSetIndex];
   const lastLog = logs.at(-1);
+  const hasNextExercise = currentExerciseIndex < templateExercises.length - 1;
+  const exerciseName =
+    templateExercises[currentExerciseIndex]?.exercises?.name ?? EXERCISE_NAME;
 
   const targetLine = useMemo(() => {
     return `${currentTemplateSet?.targetReps ?? ''} reps`;
@@ -400,6 +544,57 @@ export default function WorkoutTemplateScreen() {
       startNextSet();
     }
   }, [mode, restRemaining, restFinished]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadNextTemplate = async () => {
+      if (!templateId) {
+        if (isMounted) {
+          setNextTemplateId(null);
+        }
+        return;
+      }
+
+      const { data: currentTemplate, error: templateError } = await supabase
+        .from('workout_templates')
+        .select('id, program_id')
+        .eq('id', templateId)
+        .maybeSingle();
+
+      if (!isMounted || templateError || !currentTemplate?.program_id) {
+        if (isMounted) {
+          setNextTemplateId(null);
+        }
+        return;
+      }
+
+      const { data: templateList } = await supabase
+        .from('workout_templates')
+        .select('id')
+        .eq('program_id', currentTemplate.program_id)
+        .order('id', { ascending: true });
+
+      if (!isMounted) {
+        return;
+      }
+
+      const templates = (templateList ?? []) as { id: string }[];
+      const currentIndex = templates.findIndex((template) => template.id === currentTemplate.id);
+      const nextTemplate = currentIndex >= 0 ? templates[currentIndex + 1] : undefined;
+      setNextTemplateId(nextTemplate?.id ?? null);
+    };
+
+    void loadNextTemplate();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [templateId]);
+
+  useEffect(() => {
+    setCurrentExerciseIndex(0);
+  }, [templateId]);
 
   const prefillForNextSet = () => {
     if (!DEFAULT_PREFILL_FROM_LAST_SET || !lastLog) {
@@ -459,7 +654,7 @@ export default function WorkoutTemplateScreen() {
     setRestRemaining(0);
   };
 
-  const resetWorkout = () => {
+  const resetForNextExercise = () => {
     setMode('lifting');
     setCurrentSetIndex(0);
     resetLogs();
@@ -469,6 +664,26 @@ export default function WorkoutTemplateScreen() {
     setRestTotal(0);
     setRestPaused(false);
     setRestFinished(false);
+  };
+
+  const goToNextWorkout = () => {
+    if (nextTemplateId) {
+      router.replace({ pathname: '/workout/[templateId]', params: { templateId: nextTemplateId } });
+      return;
+    }
+
+    resetLogs();
+    router.replace('/(tabs)');
+  };
+
+  const advanceAfterExercise = () => {
+    if (hasNextExercise) {
+      setCurrentExerciseIndex((prev) => prev + 1);
+      resetForNextExercise();
+      return;
+    }
+
+    goToNextWorkout();
   };
 
   return (
@@ -494,9 +709,11 @@ export default function WorkoutTemplateScreen() {
             <Pressable
               accessibilityRole="button"
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-              onPress={resetWorkout}
+              onPress={advanceAfterExercise}
             >
-              <Text style={styles.primaryBtnText}>Reset Prototype</Text>
+              <Text style={styles.primaryBtnText}>
+                {hasNextExercise ? 'Next Exercise' : nextTemplateId ? 'Next Workout' : 'Back to Today'}
+              </Text>
             </Pressable>
           </View>
         ) : (
@@ -506,8 +723,8 @@ export default function WorkoutTemplateScreen() {
               lastLog={lastLog}
               weight={weight}
               reps={reps}
-              onChangeWeight={setWeight}
-              onChangeReps={setReps}
+              onChangeWeight={(value) => setWeight(clamp(value, 0, 500))}
+              onChangeReps={(value) => setReps(clamp(value, 0, 100))}
               onCompleteSet={completeSet}
             />
             <CompletedSetsList logs={logs} />
@@ -518,6 +735,7 @@ export default function WorkoutTemplateScreen() {
           <RestTimerScreen
             nextSetLabel={`Next: Set ${currentSetIndex + 2} of ${totalSets}`}
             remainingSeconds={restRemaining}
+            totalSeconds={restTotal}
             paused={restPaused}
             lastLog={lastLog}
             restFinished={restFinished}
@@ -601,8 +819,47 @@ const styles = StyleSheet.create({
     borderRadius: 130,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  timerRing: {
+    position: 'absolute',
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  timerProgressWrap: {
+    position: 'absolute',
+    overflow: 'hidden',
+    borderRadius: 999,
+  },
+  timerHalf: {
+    position: 'absolute',
+    width: '50%',
+    height: '100%',
+    overflow: 'hidden',
+    left: 0,
+  },
+  timerHalfRight: {
+    right: 0,
+    left: 'auto',
+  },
+  timerProgress: {
+    position: 'absolute',
     borderWidth: 10,
     borderColor: '#2563EB',
+    backgroundColor: 'transparent',
+    top: 0,
+  },
+  timerProgressLeft: {
+    left: 0,
+  },
+  timerProgressRight: {
+    right: 0,
+  },
+  timerInner: {
+    position: 'absolute',
+    backgroundColor: '#0B1220',
+  },
+  hidden: {
+    opacity: 0,
   },
   timerText: { fontSize: 56, fontWeight: '900', color: '#FFFFFF', textAlign: 'center' },
   timerHint: {
@@ -666,6 +923,13 @@ const styles = StyleSheet.create({
   },
   statCircleBig: { width: 170, height: 170, borderRadius: 85 },
   statValue: { fontSize: 44, fontWeight: '900', color: '#FFFFFF' },
+  statInput: {
+    fontSize: 44,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    minWidth: 90,
+  },
   statUnit: { fontSize: 14, fontWeight: '900', color: 'rgba(255,255,255,0.65)', marginTop: 2 },
   statControls: { flexDirection: 'row', gap: 12, marginTop: 12 },
   statBtn: {
