@@ -19,6 +19,13 @@ type TemplateSet = {
   restSeconds: number;
 };
 
+type TemplateExercise = {
+  id: string;
+  exercises?: {
+    name?: string | null;
+  } | null;
+};
+
 type SetLog = {
   setNumber: number;
   weight: number;
@@ -68,14 +75,51 @@ const formatSeconds = (total: number) => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const useSetRunnerData = (_templateId?: string) => {
-  // Placeholder data source so we can swap in Supabase queries later.
+const useSetRunnerData = (templateId?: string) => {
+  const [templateExercises, setTemplateExercises] = useState<TemplateExercise[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadExercises = async () => {
+      if (!templateId) {
+        if (isMounted) {
+          setTemplateExercises([]);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('workout_template_exercises')
+        .select('id, exercises ( name )')
+        .eq('template_id', templateId)
+        .order('id', { ascending: true });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        setTemplateExercises([]);
+        return;
+      }
+
+      setTemplateExercises((data ?? []) as TemplateExercise[]);
+    };
+
+    void loadExercises();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [templateId]);
+
   return useMemo(
     () => ({
-      exerciseName: EXERCISE_NAME,
+      templateExercises,
       templateSets: TEMPLATE_SETS,
     }),
-    [],
+    [templateExercises],
   );
 };
 
@@ -434,11 +478,12 @@ export default function WorkoutTemplateScreen() {
   const params = useLocalSearchParams<{ templateId?: string | string[] }>();
   const templateId = Array.isArray(params.templateId) ? params.templateId[0] : params.templateId;
   const router = useRouter();
-  const { exerciseName, templateSets } = useSetRunnerData(templateId);
+  const { templateExercises, templateSets } = useSetRunnerData(templateId);
   const { logs, logSet, resetLogs } = useSetRunnerLogger();
 
   const [mode, setMode] = useState<'lifting' | 'rest' | 'done'>('lifting');
   const [currentSetIndex, setCurrentSetIndex] = useState(0);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [weight, setWeight] = useState(70);
   const [reps, setReps] = useState(9);
   const [restRemaining, setRestRemaining] = useState(0);
@@ -453,6 +498,9 @@ export default function WorkoutTemplateScreen() {
   const isLastSet = currentSetIndex === totalSets - 1;
   const currentTemplateSet = templateSets[currentSetIndex];
   const lastLog = logs.at(-1);
+  const hasNextExercise = currentExerciseIndex < templateExercises.length - 1;
+  const exerciseName =
+    templateExercises[currentExerciseIndex]?.exercises?.name ?? EXERCISE_NAME;
 
   const targetLine = useMemo(() => {
     return `${currentTemplateSet?.targetReps ?? ''} reps`;
@@ -544,6 +592,10 @@ export default function WorkoutTemplateScreen() {
     };
   }, [templateId]);
 
+  useEffect(() => {
+    setCurrentExerciseIndex(0);
+  }, [templateId]);
+
   const prefillForNextSet = () => {
     if (!DEFAULT_PREFILL_FROM_LAST_SET || !lastLog) {
       return;
@@ -602,6 +654,13 @@ export default function WorkoutTemplateScreen() {
     setRestRemaining(0);
   };
 
+  const resetForNextExercise = () => {
+    setMode('lifting');
+    setCurrentSetIndex(0);
+    resetLogs();
+    router.replace('/(tabs)');
+  };
+
   const goToNextWorkout = () => {
     if (nextTemplateId) {
       router.replace({ pathname: '/workout/[templateId]', params: { templateId: nextTemplateId } });
@@ -610,6 +669,16 @@ export default function WorkoutTemplateScreen() {
 
     resetLogs();
     router.replace('/(tabs)');
+  };
+
+  const advanceAfterExercise = () => {
+    if (hasNextExercise) {
+      setCurrentExerciseIndex((prev) => prev + 1);
+      resetForNextExercise();
+      return;
+    }
+
+    goToNextWorkout();
   };
 
   return (
@@ -635,10 +704,10 @@ export default function WorkoutTemplateScreen() {
             <Pressable
               accessibilityRole="button"
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-              onPress={goToNextWorkout}
+              onPress={advanceAfterExercise}
             >
               <Text style={styles.primaryBtnText}>
-                {nextTemplateId ? 'Next Workout' : 'Back to Today'}
+                {hasNextExercise ? 'Next Exercise' : nextTemplateId ? 'Next Workout' : 'Back to Today'}
               </Text>
             </Pressable>
           </View>
@@ -769,7 +838,9 @@ const styles = StyleSheet.create({
   },
   timerProgress: {
     position: 'absolute',
-    backgroundColor: '#2563EB',
+    borderWidth: 10,
+    borderColor: '#2563EB',
+    backgroundColor: 'transparent',
     top: 0,
   },
   timerProgressLeft: {
