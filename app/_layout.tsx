@@ -62,6 +62,10 @@ export default function RootLayout() {
           name="workout/[templateId]"
           options={{ title: 'Workout', headerBackTitle: 'Back' }}
         />
+        <Stack.Screen
+          name="program/[programId]"
+          options={{ title: 'Program', headerBackTitle: 'Back' }}
+        />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />
