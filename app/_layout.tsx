@@ -3,6 +3,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { useEffect, useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { supabase } from '@/src/lib/supabase';
@@ -54,21 +55,23 @@ export default function RootLayout() {
   }, [isLoading, router, segments, session]);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="workout/[templateId]"
-          options={{ title: 'Workout', headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="program/[programId]"
-          options={{ title: 'Program', headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="workout/[templateId]"
+            options={{ title: 'Workout', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="program/[programId]"
+            options={{ title: 'Program', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        </Stack>
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -1,6 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { supabase } from '@/src/lib/supabase';
@@ -127,8 +128,11 @@ export default function ProgramDetailsScreen() {
   }, [programId]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        contentInsetAdjustmentBehavior="never"
+      >
         {loading ? (
           <ActivityIndicator size="large" />
         ) : errorMessage ? (
@@ -151,11 +155,18 @@ export default function ProgramDetailsScreen() {
               ) : (
                 scheduleByWeek.map(([week, items]) => (
                   <View key={`week-${week}`} style={styles.weekBlock}>
-                    <ThemedText style={styles.weekTitle}>
-                      {week > 0 ? `Week ${week}` : 'Week'}
-                    </ThemedText>
+                    <View style={styles.weekHeader}>
+                      <View style={styles.weekBadge}>
+                        <ThemedText style={styles.weekBadgeText}>
+                          {week > 0 ? `Week ${week}` : 'Week'}
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={styles.weekCount}>
+                        {items.length} workout{items.length === 1 ? '' : 's'}
+                      </ThemedText>
+                    </View>
                     <View style={styles.weekList}>
-                      {items.map((item) => {
+                      {items.map((item, index) => {
                         const template = item.workout_template_id
                           ? templateById.get(item.workout_template_id) ?? null
                           : null;
@@ -170,7 +181,13 @@ export default function ProgramDetailsScreen() {
                           metaParts.push(`~${template.target_duration_min} min`);
                         }
                         return (
-                          <View key={item.id} style={styles.scheduleRow}>
+                          <View
+                            key={item.id}
+                            style={[
+                              styles.scheduleRow,
+                              index < items.length - 1 && styles.scheduleRowDivider,
+                            ]}
+                          >
                             <ThemedText style={styles.scheduleTitle}>
                               {template?.name ?? 'Workout'}
                             </ThemedText>
@@ -202,11 +219,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   container: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    paddingTop: 12,
     gap: 24,
   },
   header: {
     gap: 8,
+    marginTop: 6,
   },
   description: {
     color: '#52525b',
@@ -216,20 +236,49 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   weekBlock: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  weekHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
   },
-  weekTitle: {
-    fontSize: 16,
+  weekBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+  },
+  weekBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: '700',
   },
+  weekCount: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   weekList: {
-    gap: 10,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    overflow: 'hidden',
   },
   scheduleRow: {
     padding: 12,
-    borderRadius: 14,
-    backgroundColor: '#f4f4f5',
     gap: 4,
+  },
+  scheduleRowDivider: {
+    borderBottomWidth: 1,
+    borderColor: '#e2e8f0',
   },
   scheduleTitle: {
     fontSize: 14,

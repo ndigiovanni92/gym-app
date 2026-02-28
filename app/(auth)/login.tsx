@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -31,55 +40,71 @@ export default function LoginScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <View style={styles.header}>
-        <ThemedText type="title">Welcome back</ThemedText>
-        <ThemedText type="subtitle">Sign in to continue</ThemedText>
-      </View>
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoider}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <ThemedView style={styles.container}>
+          <View style={styles.header}>
+            <ThemedText type="title">Welcome back</ThemedText>
+            <ThemedText type="subtitle">Sign in to continue</ThemedText>
+          </View>
 
-      <View style={styles.form}>
-        <View style={styles.inputGroup}>
-          <ThemedText style={styles.label}>Email</ThemedText>
-          <TextInput
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            style={styles.input}
-            value={email}
-          />
-        </View>
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <ThemedText style={styles.label}>Email</ThemedText>
+              <TextInput
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                style={styles.input}
+                value={email}
+              />
+            </View>
 
-        <View style={styles.inputGroup}>
-          <ThemedText style={styles.label}>Password</ThemedText>
-          <TextInput
-            autoCapitalize="none"
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            secureTextEntry
-            style={styles.input}
-            value={password}
-          />
-        </View>
+            <View style={styles.inputGroup}>
+              <ThemedText style={styles.label}>Password</ThemedText>
+              <TextInput
+                autoCapitalize="none"
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                secureTextEntry
+                style={styles.input}
+                value={password}
+              />
+            </View>
 
-        <Pressable disabled={loading} onPress={handleAuth} style={styles.primaryButton}>
-          <ThemedText type="defaultSemiBold" style={styles.primaryButtonText}>
-            {loading ? 'Loading…' : isSignUp ? 'Create account' : 'Sign in'}
-          </ThemedText>
-        </Pressable>
+            <Pressable disabled={loading} onPress={handleAuth} style={styles.primaryButton}>
+              <ThemedText type="defaultSemiBold" style={styles.primaryButtonText}>
+                {loading ? 'Loading…' : isSignUp ? 'Create account' : 'Sign in'}
+              </ThemedText>
+            </Pressable>
 
-        <Pressable disabled={loading} onPress={() => setIsSignUp((prev) => !prev)}>
-          <ThemedText style={styles.secondaryAction}>
-            {isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
-          </ThemedText>
-        </Pressable>
-      </View>
-    </ThemedView>
+            <Pressable disabled={loading} onPress={() => setIsSignUp((prev) => !prev)}>
+              <ThemedText style={styles.secondaryAction}>
+                {isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
+              </ThemedText>
+            </Pressable>
+          </View>
+        </ThemedView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoider: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     padding: 24,
