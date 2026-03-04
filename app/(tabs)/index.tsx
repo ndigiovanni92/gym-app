@@ -57,6 +57,7 @@ type ProgramSchedule = {
   day_number?: number | null;
   sort_order?: number | null;
   workout_template_id?: string | null;
+  template_id?: string | null;
 };
 
 export default function TodayScreen() {
@@ -64,18 +65,22 @@ export default function TodayScreen() {
   const [activeProgram, setActiveProgram] = useState<ActiveProgram | null>(null);
   const [schedules, setSchedules] = useState<ProgramSchedule[]>([]);
   const [nextScheduleId, setNextScheduleId] = useState<string | null>(null);
+  const [nextWorkoutTemplateId, setNextWorkoutTemplateId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [lastCompleted, setLastCompleted] = useState<LastCompleted | null>(null);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [enrollingProgramId, setEnrollingProgramId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [showProgramAbout, setShowProgramAbout] = useState(false);
   const [showWorkoutDetails, setShowWorkoutDetails] = useState(false);
   const [showSwitchWorkout, setShowSwitchWorkout] = useState(false);
   const [showEndProgram, setShowEndProgram] = useState(false);
   const [showWorkoutActions, setShowWorkoutActions] = useState(false);
   const [showProgramActions, setShowProgramActions] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [endingWorkout, setEndingWorkout] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -86,8 +91,9 @@ export default function TodayScreen() {
   const todayIndex = totalWorkouts > 0 ? 1 : 0;
   const nextSchedule =
     nextScheduleId ? schedules.find((schedule) => schedule.id === nextScheduleId) : null;
-  const nextTemplate = nextSchedule?.workout_template_id
-    ? templateById.get(nextSchedule.workout_template_id) ?? null
+  const resolvedNextTemplateId = nextSchedule?.workout_template_id ?? nextWorkoutTemplateId;
+  const nextTemplate = resolvedNextTemplateId
+    ? templateById.get(resolvedNextTemplateId) ?? null
     : null;
   const hasActiveWorkout = !!activeSession?.id;
   const activeTemplate = activeSession?.workout_template_id
@@ -145,12 +151,12 @@ export default function TodayScreen() {
           ? ` \u2022 ~${displayTemplate.target_duration_min} min`
           : ''
       }`
-    : nextSchedule?.workout_template_id
+    : resolvedNextTemplateId
     ? 'Workout scheduled'
     : 'No workout scheduled';
   const primaryCtaTemplateId = hasActiveWorkout
-    ? activeSession?.workout_template_id ?? nextSchedule?.workout_template_id ?? null
-    : nextSchedule?.workout_template_id ?? null;
+    ? activeSession?.workout_template_id ?? resolvedNextTemplateId ?? null
+    : resolvedNextTemplateId ?? null;
   const primaryCtaLabel = hasActiveWorkout ? 'Resume Workout' : 'Start Workout';
   const lastCompletedDate = lastCompleted?.completed_at
     ? new Date(lastCompleted.completed_at).toLocaleDateString('en-US', {
@@ -171,11 +177,12 @@ export default function TodayScreen() {
   const lastCompletedTitle =
     lastCompleted?.workout_templates?.name ?? lastCompleted?.workout_template_id ?? null;
   const ctaHint =
-    !hasActiveWorkout && nextSchedule?.workout_template_id && !nextTemplate
+    !hasActiveWorkout && resolvedNextTemplateId && !nextTemplate
       ? "Workout template details aren't available yet."
-      : !hasActiveWorkout && !nextSchedule?.workout_template_id
+      : !hasActiveWorkout && !resolvedNextTemplateId
       ? 'No next workout found for this program.'
       : null;
+  const profileInitial = userEmail?.trim().charAt(0).toUpperCase() || 'U';
 
   const refreshToday = useCallback(async () => {
     setLoading(true);
@@ -185,11 +192,14 @@ export default function TodayScreen() {
     const { data: userData } = await supabase.auth.getUser();
     const nextUserId = userData?.user?.id ?? null;
     setUserId(nextUserId);
+    setUserEmail(userData?.user?.email ?? null);
 
     if (!nextUserId) {
+      setUserEmail(null);
       setActiveProgram(null);
       setSchedules([]);
       setNextScheduleId(null);
+      setNextWorkoutTemplateId(null);
       setTemplates([]);
       setLastCompleted(null);
       setPrograms([]);
@@ -212,6 +222,7 @@ export default function TodayScreen() {
       setActiveProgram(null);
       setSchedules([]);
       setNextScheduleId(null);
+      setNextWorkoutTemplateId(null);
       setTemplates([]);
       setLastCompleted(null);
       setPrograms([]);
@@ -224,6 +235,7 @@ export default function TodayScreen() {
       setActiveProgram(null);
       setSchedules([]);
       setNextScheduleId(null);
+      setNextWorkoutTemplateId(null);
       setTemplates([]);
       setLastCompleted(null);
 
@@ -254,10 +266,22 @@ export default function TodayScreen() {
       .select('next_program_schedule_id, next_workout_template_id')
       .eq('user_program_id', programData.id)
       .maybeSingle();
+    console.log('[Today] Progress row fetched', {
+      userProgramId: programData.id,
+      progressData,
+    });
 
     const progress = (progressData as ProgramProgress | null) ?? null;
     let nextSchedulePointer = progress?.next_program_schedule_id ?? null;
+    let nextTemplatePointer = progress?.next_workout_template_id ?? null;
 
+    const mapTemplateIdRows = (rows: ProgramSchedule[]) =>
+      rows.map((row) => ({
+        ...row,
+        workout_template_id: row.workout_template_id ?? row.template_id ?? null,
+      }));
+
+    let scheduleRows: ProgramSchedule[] = [];
     const { data: scheduleList, error: scheduleListError } = await supabase
       .from('program_schedule')
       .select('id, week_number, day_number, sort_order, workout_template_id')
@@ -265,38 +289,71 @@ export default function TodayScreen() {
       .order('week_number', { ascending: true })
       .order('day_number', { ascending: true });
 
-    if (scheduleListError) {
-      setErrorMessage(scheduleListError.message);
-      setSchedules([]);
-    } else {
-      setSchedules((scheduleList as ProgramSchedule[]) ?? []);
+    if (!scheduleListError) {
+      scheduleRows = mapTemplateIdRows((scheduleList as ProgramSchedule[] | null) ?? []);
     }
-    const scheduleRows = (scheduleList as ProgramSchedule[] | null) ?? [];
 
-    if (!nextSchedulePointer && scheduleRows.length > 0) {
+    const hasTemplatePointer = scheduleRows.some((row) => !!row.workout_template_id);
+    if (scheduleListError || (!hasTemplatePointer && scheduleRows.length > 0)) {
+      const { data: templateIdScheduleList, error: templateIdScheduleError } = await supabase
+        .from('program_schedule')
+        .select('id, week_number, day_number, sort_order, template_id')
+        .eq('program_id', programData.program_id)
+        .order('week_number', { ascending: true })
+        .order('day_number', { ascending: true });
+
+      if (!templateIdScheduleError) {
+        scheduleRows = mapTemplateIdRows((templateIdScheduleList as ProgramSchedule[] | null) ?? []);
+      } else if (scheduleListError) {
+        setErrorMessage(scheduleListError.message);
+      }
+    }
+
+    setSchedules(scheduleRows);
+
+    if (nextSchedulePointer && !nextTemplatePointer) {
+      const pointedSchedule = scheduleRows.find((schedule) => schedule.id === nextSchedulePointer) ?? null;
+      if (pointedSchedule?.workout_template_id) {
+        nextTemplatePointer = pointedSchedule.workout_template_id;
+      }
+    }
+
+    if ((!nextSchedulePointer || !nextTemplatePointer) && scheduleRows.length > 0) {
       const fallbackSchedule =
+        scheduleRows.find(
+          (schedule) =>
+            schedule.week_number === 1 &&
+            schedule.day_number === 1 &&
+            !!schedule.workout_template_id,
+        ) ??
+        scheduleRows.find((schedule) => !!schedule.workout_template_id) ??
         scheduleRows.find((schedule) => schedule.week_number === 1 && schedule.day_number === 1) ??
         scheduleRows[0];
       if (fallbackSchedule) {
+        nextSchedulePointer = fallbackSchedule.id;
+        nextTemplatePointer = fallbackSchedule.workout_template_id ?? nextTemplatePointer;
         const { error: progressUpdateError } = await supabase
           .from('user_program_progress')
           .upsert(
             {
               user_program_id: programData.id,
               next_program_schedule_id: fallbackSchedule.id,
-              next_workout_template_id: fallbackSchedule.workout_template_id ?? null,
+              next_workout_template_id:
+                fallbackSchedule.workout_template_id ?? nextTemplatePointer ?? null,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'user_program_id' },
           );
-
-        if (!progressUpdateError) {
-          nextSchedulePointer = fallbackSchedule.id;
+        if (progressUpdateError) {
+          console.warn('[Today] Failed to upsert progress fallback in refreshToday', {
+            userProgramId: programData.id,
+            fallbackScheduleId: fallbackSchedule.id,
+            fallbackTemplateId: fallbackSchedule.workout_template_id ?? nextTemplatePointer ?? null,
+            error: progressUpdateError,
+          });
         }
       }
     }
-
-    setNextScheduleId(nextSchedulePointer);
 
     const { data: sessionData } = await supabase
       .from('workout_sessions')
@@ -331,9 +388,37 @@ export default function TodayScreen() {
       setErrorMessage(templateError.message);
       setTemplates([]);
     } else {
-      setTemplates((templateList as WorkoutTemplate[]) ?? []);
+      const templateRows = (templateList as WorkoutTemplate[]) ?? [];
+      setTemplates(templateRows);
+      if (!nextTemplatePointer && templateRows.length > 0) {
+        const fallbackTemplateId = templateRows[0]?.id ?? null;
+        if (fallbackTemplateId) {
+          nextTemplatePointer = fallbackTemplateId;
+          const { error: fallbackTemplateError } = await supabase
+            .from('user_program_progress')
+            .upsert(
+              {
+                user_program_id: programData.id,
+                next_program_schedule_id: nextSchedulePointer,
+                next_workout_template_id: fallbackTemplateId,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: 'user_program_id' },
+            );
+          if (fallbackTemplateError) {
+            console.warn('[Today] Failed to persist fallback template pointer', {
+              userProgramId: programData.id,
+              nextSchedulePointer,
+              fallbackTemplateId,
+              error: fallbackTemplateError,
+              });
+          }
+        }
+      }
     }
 
+    setNextScheduleId(nextSchedulePointer);
+    setNextWorkoutTemplateId(nextTemplatePointer);
     setLoading(false);
   }, []);
 
@@ -396,32 +481,60 @@ export default function TodayScreen() {
       return;
     }
 
-    const { data: firstSchedule } = await supabase
+    const mapTemplateIdRows = (rows: ProgramSchedule[]) =>
+      rows.map((row) => ({
+        ...row,
+        workout_template_id: row.workout_template_id ?? row.template_id ?? null,
+      }));
+
+    let scheduleRows: ProgramSchedule[] = [];
+    const { data: orderedSchedules, error: orderedScheduleError } = await supabase
       .from('program_schedule')
       .select('id, week_number, day_number, workout_template_id')
       .eq('program_id', program.id)
-      .eq('week_number', 1)
-      .eq('day_number', 1)
-      .maybeSingle();
+      .order('week_number', { ascending: true })
+      .order('day_number', { ascending: true });
 
-    let selectedSchedule = (firstSchedule as ProgramSchedule | null) ?? null;
-    if (!selectedSchedule?.id) {
-      const { data: fallbackSchedule } = await supabase
+    if (!orderedScheduleError) {
+      scheduleRows = mapTemplateIdRows((orderedSchedules as ProgramSchedule[] | null) ?? []);
+    }
+
+    if (orderedScheduleError || !scheduleRows.some((row) => !!row.workout_template_id)) {
+      const { data: templateIdSchedules } = await supabase
         .from('program_schedule')
-        .select('id, week_number, day_number, workout_template_id')
+        .select('id, week_number, day_number, template_id')
         .eq('program_id', program.id)
         .order('week_number', { ascending: true })
-        .order('day_number', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      selectedSchedule = (fallbackSchedule as ProgramSchedule | null) ?? null;
+        .order('day_number', { ascending: true });
+
+      scheduleRows = mapTemplateIdRows((templateIdSchedules as ProgramSchedule[] | null) ?? scheduleRows);
     }
+    const selectedSchedule =
+      scheduleRows.find(
+        (schedule) =>
+          schedule.week_number === 1 && schedule.day_number === 1 && !!schedule.workout_template_id,
+      ) ??
+      scheduleRows.find((schedule) => !!schedule.workout_template_id) ??
+      scheduleRows.find((schedule) => schedule.week_number === 1 && schedule.day_number === 1) ??
+      scheduleRows[0] ??
+      null;
+
     const nextScheduleId = selectedSchedule?.id ?? null;
     const nextWeek = selectedSchedule?.week_number ?? 1;
-    const nextTemplateId = selectedSchedule?.workout_template_id ?? null;
+    let nextTemplateId = selectedSchedule?.workout_template_id ?? null;
+    if (!nextTemplateId) {
+      const { data: firstTemplate } = await supabase
+        .from('workout_templates')
+        .select('id')
+        .eq('program_id', program.id)
+        .order('id', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      nextTemplateId = (firstTemplate as { id?: string } | null)?.id ?? null;
+    }
 
     if (enrollmentId && nextScheduleId) {
-      await supabase
+      const { error: enrollProgressError } = await supabase
         .from('user_program_progress')
         .upsert(
           {
@@ -433,6 +546,22 @@ export default function TodayScreen() {
           },
           { onConflict: 'user_program_id' },
         );
+      if (enrollProgressError) {
+        console.warn('[Today] Failed to upsert progress during enrollment', {
+          enrollmentId,
+          nextScheduleId,
+          nextTemplateId,
+          nextWeek,
+          error: enrollProgressError,
+        });
+      } else {
+        console.log('[Today] Enrollment progress upserted', {
+          enrollmentId,
+          nextScheduleId,
+          nextTemplateId,
+          nextWeek,
+        });
+      }
     }
 
     setEnrollingProgramId(null);
@@ -531,11 +660,34 @@ export default function TodayScreen() {
     await refreshToday();
   };
 
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    setErrorMessage(null);
+    const { error } = await supabase.auth.signOut();
+    setSigningOut(false);
+    setShowProfileMenu(false);
+
+    if (error) {
+      setErrorMessage('Unable to sign out.');
+      return;
+    }
+
+    router.replace('/(auth)/login');
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ThemedView style={styles.container}>
         <View style={styles.header}>
           <ThemedText type="title">Today</ThemedText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open account menu"
+            style={({ pressed }) => [styles.profileButton, pressed && styles.btnPressed]}
+            onPress={() => setShowProfileMenu(true)}
+          >
+            <ThemedText style={styles.profileButtonText}>{profileInitial}</ThemedText>
+          </Pressable>
         </View>
 
         {loading ? (
@@ -716,6 +868,36 @@ export default function TodayScreen() {
           </View>
         )}
       </ThemedView>
+      <Modal transparent visible={showProfileMenu} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <ThemedText type="defaultSemiBold">Account</ThemedText>
+            <ThemedText style={styles.modalBody}>{userEmail ?? 'Signed in'}</ThemedText>
+            <View style={styles.modalActionsRow}>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.modalSecondaryBtn}
+                onPress={() => setShowProfileMenu(false)}
+              >
+                <ThemedText style={styles.modalSecondaryText}>Close</ThemedText>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={[
+                  styles.modalDestructiveBtn,
+                  signingOut && styles.secondaryBtnDisabled,
+                ]}
+                onPress={() => void handleSignOut()}
+                disabled={signingOut}
+              >
+                <ThemedText style={styles.modalDestructiveText}>
+                  {signingOut ? 'Signing out...' : 'Log out'}
+                </ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Modal transparent visible={showSwitchWorkout} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -924,6 +1106,24 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  profileButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#eef2f7',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileButtonText: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '800',
   },
   content: {
     gap: 28,

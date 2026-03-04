@@ -46,10 +46,14 @@ export default function RootLayout() {
     }
 
     const inAuthGroup = segments[0] === '(auth)';
+    const authScreen = inAuthGroup ? segments[1] : null;
+    const authScreensAllowedWithSession = new Set(['callback', 'reset-password']);
+    const inSessionAllowedAuthScreen =
+      authScreen != null && authScreensAllowedWithSession.has(authScreen);
 
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (session && inAuthGroup) {
+    } else if (session && inAuthGroup && !inSessionAllowedAuthScreen) {
       router.replace('/(tabs)');
     }
   }, [isLoading, router, segments, session]);

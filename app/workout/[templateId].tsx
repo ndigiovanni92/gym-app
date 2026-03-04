@@ -1,9 +1,13 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Animated,
   ActivityIndicator,
+  InputAccessoryView,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -121,12 +125,10 @@ type RestTimerScreenProps = {
   nextSetLabel: string;
   remainingSeconds: number;
   totalSeconds: number;
-  paused: boolean;
   lastLog?: SetLog;
   restFinished: boolean;
   onAddRest: (seconds: number) => void;
   onSkipRest: () => void;
-  onTogglePause: () => void;
   onStartNextSet: () => void;
 };
 
@@ -678,11 +680,9 @@ const CompletedSetsList = ({
 const BigTimer = ({
   remainingSeconds,
   totalSeconds,
-  paused,
 }: {
   remainingSeconds: number;
   totalSeconds: number;
-  paused: boolean;
 }) => {
   const pulse = useRef(new Animated.Value(0)).current;
   const progress =
@@ -697,7 +697,8 @@ const BigTimer = ({
   );
 
   useEffect(() => {
-    if (paused) {
+    const isActive = remainingSeconds > 0;
+    if (!isActive) {
       pulse.stopAnimation();
       pulse.setValue(0);
       return;
@@ -712,7 +713,7 @@ const BigTimer = ({
 
     loop.start();
     return () => loop.stop();
-  }, [paused, pulse]);
+  }, [remainingSeconds, pulse]);
 
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] });
 
@@ -762,7 +763,7 @@ const BigTimer = ({
           {remainingSeconds === 0 ? 'Ready' : formatSeconds(remainingSeconds)}
         </Text>
         <Text style={styles.timerHint}>
-          {paused ? 'Paused' : remainingSeconds === 0 ? "You're good to go" : 'Resting'}
+          {remainingSeconds === 0 ? "You're good to go" : 'Resting'}
         </Text>
       </Animated.View>
     </View>
@@ -773,16 +774,12 @@ const RestTimerScreen = ({
   nextSetLabel,
   remainingSeconds,
   totalSeconds,
-  paused,
   lastLog,
   restFinished,
   onAddRest,
   onSkipRest,
-  onTogglePause,
   onStartNextSet,
 }: RestTimerScreenProps) => {
-  const [showOverflow, setShowOverflow] = useState(false);
-
   return (
     <SafeAreaView style={styles.restSafe}>
       <View style={styles.restContainer}>
@@ -796,95 +793,65 @@ const RestTimerScreen = ({
           ) : null}
         </View>
 
-        <View style={styles.restSpacer} />
+        <View style={styles.restCenterSection}>
+          <BigTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} />
 
-        <BigTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} paused={paused} />
-
-        <View style={styles.restInlineActions}>
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
-            onPress={() => onAddRest(15)}
-          >
-            <Text style={styles.restInlineText}>+15s</Text>
-          </Pressable>
-          <Text style={styles.restInlineDot}>·</Text>
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
-            onPress={() => onAddRest(30)}
-          >
-            <Text style={styles.restInlineText}>+30s</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.restInlineOverflow, pressed && styles.btnPressed]}
-            onPress={() => setShowOverflow(true)}
-          >
-            <Text style={styles.restInlineOverflowText}>Adjust</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.restFooterSpacer} />
-
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.restPrimaryBtn,
-            pressed && styles.btnPressed,
-            !restFinished && styles.primaryBtnDisabled,
-          ]}
-          disabled={!restFinished}
-          onPress={onStartNextSet}
-        >
-          <Text style={styles.restPrimaryBtnText}>Start Next Set</Text>
-        </Pressable>
-
-        <View style={styles.restLinkSpacer} />
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.linkBtn, pressed && styles.btnPressed]}
-          onPress={onStartNextSet}
-        >
-          <Text style={styles.restLinkText}>Start now</Text>
-        </Pressable>
-      </View>
-      <Modal transparent visible={showOverflow} animationType="fade">
-        <View style={styles.editOverlay}>
-          <View style={styles.editCard}>
-            <Text style={styles.editTitle}>Rest Options</Text>
+          <View style={styles.restInlineActions}>
             <Pressable
               accessibilityRole="button"
-              style={({ pressed }) => [styles.overflowAction, pressed && styles.btnPressed]}
-              onPress={() => {
-                setShowOverflow(false);
-                onTogglePause();
-              }}
+              style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
+              onPress={() => onAddRest(-30)}
             >
-              <Text style={styles.overflowActionText}>{paused ? 'Resume' : 'Pause'}</Text>
+              <Text style={styles.restInlineText}>-30s</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              style={({ pressed }) => [styles.overflowAction, pressed && styles.btnPressed]}
-              onPress={() => {
-                setShowOverflow(false);
-                onSkipRest();
-              }}
+              style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
+              onPress={() => onAddRest(-15)}
             >
-              <Text style={styles.overflowActionText}>Skip Rest</Text>
+              <Text style={styles.restInlineText}>-15s</Text>
             </Pressable>
-            <View style={styles.editActions}>
-              <Pressable
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.editBtn, pressed && styles.btnPressed]}
-                onPress={() => setShowOverflow(false)}
-              >
-                <Text style={styles.editBtnText}>Close</Text>
-              </Pressable>
-            </View>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
+              onPress={() => onAddRest(15)}
+            >
+              <Text style={styles.restInlineText}>+15s</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.restInlineBtn, pressed && styles.btnPressed]}
+              onPress={() => onAddRest(30)}
+            >
+              <Text style={styles.restInlineText}>+30s</Text>
+            </Pressable>
           </View>
         </View>
-      </Modal>
+
+        <View style={styles.restFooterActions}>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.restPrimaryBtn,
+              pressed && styles.btnPressed,
+              !restFinished && styles.primaryBtnDisabled,
+            ]}
+            disabled={!restFinished}
+            onPress={onStartNextSet}
+          >
+            <Text style={styles.restPrimaryBtnText}>Start Next Set</Text>
+          </Pressable>
+
+          <View style={styles.restLinkSpacer} />
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.linkBtn, pressed && styles.btnPressed]}
+            onPress={onStartNextSet}
+          >
+            <Text style={styles.restLinkText}>Start now</Text>
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 };
@@ -907,6 +874,7 @@ const StatStepper = ({
   const pop = useRef(new Animated.Value(0)).current;
   const [draftValue, setDraftValue] = useState(String(value));
   const didMountRef = useRef(false);
+  const accessoryId = `stat-stepper-${label.toLowerCase()}-done`;
 
   useEffect(() => {
     setDraftValue(String(value));
@@ -949,6 +917,10 @@ const StatStepper = ({
           maxLength={3}
           keyboardType="number-pad"
           inputMode="numeric"
+          returnKeyType="done"
+          blurOnSubmit
+          inputAccessoryViewID={Platform.OS === 'ios' ? accessoryId : undefined}
+          onSubmitEditing={() => Keyboard.dismiss()}
           selectTextOnFocus
           style={styles.statInput}
         />
@@ -974,6 +946,19 @@ const StatStepper = ({
           <Text style={styles.statBtnText}>+</Text>
         </Pressable>
       </View>
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={accessoryId}>
+          <View style={styles.keyboardAccessory}>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.keyboardDoneBtn, pressed && styles.btnPressed]}
+              onPress={() => Keyboard.dismiss()}
+            >
+              <Text style={styles.keyboardDoneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </View>
   );
 };
@@ -994,7 +979,7 @@ export default function WorkoutTemplateScreen() {
   const [reps, setReps] = useState(INITIAL_REPS);
   const [restRemaining, setRestRemaining] = useState(0);
   const [restTotal, setRestTotal] = useState(0);
-  const [restPaused, setRestPaused] = useState(false);
+  const [restEndsAtMs, setRestEndsAtMs] = useState<number | null>(null);
   const [restFinished, setRestFinished] = useState(false);
   const [templateExercises, setTemplateExercises] = useState<TemplateExercise[]>([]);
   const [workoutSessionId, setWorkoutSessionId] = useState<string | null>(null);
@@ -1102,6 +1087,7 @@ export default function WorkoutTemplateScreen() {
   useEffect(() => {
     if (mode !== 'rest') {
       restTickedRef.current = false;
+      setRestEndsAtMs(null);
       return;
     }
 
@@ -1109,14 +1095,18 @@ export default function WorkoutTemplateScreen() {
       clearInterval(intervalRef.current);
     }
 
+    const syncRemaining = () => {
+      if (!restEndsAtMs) {
+        return;
+      }
+      const nextRemaining = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000));
+      setRestRemaining((prev) => (prev === nextRemaining ? prev : nextRemaining));
+    };
+
+    syncRemaining();
     intervalRef.current = setInterval(() => {
-      setRestRemaining((prev) => {
-        if (restPaused) {
-          return prev;
-        }
-        return prev <= 1 ? 0 : prev - 1;
-      });
-    }, 1000);
+      syncRemaining();
+    }, 250);
 
     return () => {
       if (intervalRef.current) {
@@ -1124,7 +1114,21 @@ export default function WorkoutTemplateScreen() {
       }
       intervalRef.current = null;
     };
-  }, [mode, restPaused]);
+  }, [mode, restEndsAtMs]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || mode !== 'rest' || !restEndsAtMs) {
+        return;
+      }
+      const nextRemaining = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000));
+      setRestRemaining(nextRemaining);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [mode, restEndsAtMs]);
 
   useEffect(() => {
     if (mode !== 'rest' || restRemaining !== 0 || restFinished) {
@@ -1190,7 +1194,7 @@ export default function WorkoutTemplateScreen() {
       setReps(INITIAL_REPS);
       setRestRemaining(0);
       setRestTotal(0);
-      setRestPaused(false);
+      setRestEndsAtMs(null);
       setRestFinished(false);
       setMode('preview');
       setWorkoutSessionId(null);
@@ -1942,7 +1946,7 @@ export default function WorkoutTemplateScreen() {
           const candidate = exercise.rest_seconds ?? baseRestSeconds;
           return candidate > maxValue ? candidate : maxValue;
         }, 0);
-        setRestPaused(false);
+        setRestEndsAtMs(Date.now() + blockRestSeconds * 1000);
         setRestFinished(false);
         setRestTotal(blockRestSeconds);
         setRestRemaining(blockRestSeconds);
@@ -1952,7 +1956,7 @@ export default function WorkoutTemplateScreen() {
       }
     } else {
       if (!isLastRound) {
-        setRestPaused(false);
+        setRestEndsAtMs(Date.now() + baseRestSeconds * 1000);
         setRestFinished(false);
         setRestTotal(baseRestSeconds);
         setRestRemaining(baseRestSeconds);
@@ -1969,7 +1973,7 @@ export default function WorkoutTemplateScreen() {
 
     const nextBlockRestSeconds = currentExercise?.rest_seconds ?? baseRestSeconds;
     if (nextBlockRestSeconds > 0) {
-      setRestPaused(false);
+      setRestEndsAtMs(Date.now() + nextBlockRestSeconds * 1000);
       setRestFinished(false);
       setRestTotal(nextBlockRestSeconds);
       setRestRemaining(nextBlockRestSeconds);
@@ -1989,7 +1993,7 @@ export default function WorkoutTemplateScreen() {
     setReps(INITIAL_REPS);
     setRestRemaining(0);
     setRestTotal(0);
-    setRestPaused(false);
+    setRestEndsAtMs(null);
     setRestFinished(false);
     pendingAdvanceRef.current = null;
     setMode('lifting');
@@ -2013,7 +2017,7 @@ export default function WorkoutTemplateScreen() {
     prefillForNextSet();
     setRestRemaining(0);
     setRestTotal(0);
-    setRestPaused(false);
+    setRestEndsAtMs(null);
     setRestFinished(false);
     setMode('lifting');
   }, [
@@ -2027,14 +2031,22 @@ export default function WorkoutTemplateScreen() {
   const pendingAdvanceRef = useRef<'round' | 'block' | null>(null);
 
   const addRest = (seconds: number) => {
-    setRestRemaining((prev) => clamp(prev + seconds, 0, 60 * 60));
-    setRestTotal((prev) => clamp(prev + seconds, 0, 60 * 60));
-    setRestFinished(false);
+    const now = Date.now();
+    const currentEndsAt = restEndsAtMs ?? now + restRemaining * 1000;
+    const nextEndsAt = Math.max(now, currentEndsAt + seconds * 1000);
+    const nextRemaining = Math.max(0, Math.ceil((nextEndsAt - now) / 1000));
+
+    setRestRemaining(nextRemaining);
+    setRestTotal((prev) => Math.max(nextRemaining, clamp(prev + seconds, 0, 60 * 60)));
+    setRestEndsAtMs(nextRemaining > 0 ? nextEndsAt : null);
+    setRestFinished(nextRemaining === 0);
   };
 
   const skipRest = () => {
     pendingAdvanceRef.current = null;
     setRestRemaining(0);
+    setRestEndsAtMs(null);
+    setRestFinished(true);
   };
 
   const markWorkoutSessionComplete = async () => {
@@ -2568,9 +2580,23 @@ export default function WorkoutTemplateScreen() {
     cancelEdit();
   };
 
+  const getBlockLeadExerciseName = (block?: WorkoutBlock | null) => {
+    if (!block) {
+      return null;
+    }
+    if (block.type === 'single') {
+      return block.exercise.exercises?.name ?? null;
+    }
+    return block.exercises[0]?.exercises?.name ?? null;
+  };
+
+  const nextBlock = workoutBlocks[currentBlockIndex + 1] ?? null;
+  const nextBlockLeadExerciseName = getBlockLeadExerciseName(nextBlock);
   const restNextLabel =
     pendingAdvanceRef.current === 'block'
-      ? `Next: Block ${Math.min(currentBlockIndex + 2, totalBlocks)} of ${totalBlocks}`
+      ? nextBlockLeadExerciseName
+        ? `Next: ${nextBlockLeadExerciseName}`
+        : `Next: Block ${Math.min(currentBlockIndex + 2, totalBlocks)} of ${totalBlocks}`
       : isSupersetBlock
       ? `Next: Round ${Math.min(currentRoundIndex + 2, totalRounds)} of ${totalRounds}`
       : `Next: Set ${Math.min(currentRoundIndex + 2, totalRounds)} of ${totalRounds}`;
@@ -2780,12 +2806,10 @@ export default function WorkoutTemplateScreen() {
             nextSetLabel={restNextLabel}
             remainingSeconds={restRemaining}
             totalSeconds={restTotal}
-            paused={restPaused}
             lastLog={lastLog}
             restFinished={restFinished}
             onAddRest={addRest}
             onSkipRest={skipRest}
-            onTogglePause={() => setRestPaused((prev) => !prev)}
             onStartNextSet={handleRestAdvance}
           />
         </Modal>
@@ -3426,7 +3450,7 @@ const styles = StyleSheet.create({
   completedList: { marginTop: 8 },
   restSafe: { flex: 1, backgroundColor: '#0B1220' },
   restContainer: { flex: 1, padding: 20 },
-  restHeader: { alignItems: 'center', paddingTop: 8 },
+  restHeader: { alignItems: 'center', paddingTop: 28 },
   restTitle: { fontSize: 20, fontWeight: '900', color: '#FFFFFF' },
   restSubtitle: {
     fontSize: 14,
@@ -3434,7 +3458,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.75)',
     marginTop: 6,
   },
-  restSpacer: { height: 24 },
+  restCenterSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 18,
+  },
   timerWrap: { alignItems: 'center', justifyContent: 'center' },
   timerCircle: {
     width: 260,
@@ -3483,7 +3512,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    marginTop: 18,
+    flexWrap: 'wrap',
   },
   restInlineBtn: {
     paddingVertical: 6,
@@ -3502,7 +3531,9 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   restInlineOverflowText: { fontSize: 13, fontWeight: '900', color: 'rgba(255,255,255,0.7)' },
-  restFooterSpacer: { flex: 1 },
+  restFooterActions: {
+    marginTop: 'auto',
+  },
   restPrimaryBtn: {
     height: 56,
     borderRadius: 16,
@@ -3555,6 +3586,27 @@ const styles = StyleSheet.create({
   },
   statBtnText: { fontSize: 22, fontWeight: '900', color: '#FFFFFF' },
   statsGrid: { flexDirection: 'row', gap: 16, justifyContent: 'space-between' },
+  keyboardAccessory: {
+    backgroundColor: '#0B1220',
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'flex-end',
+  },
+  keyboardDoneBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(37,99,235,0.24)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(37,99,235,0.55)',
+  },
+  keyboardDoneText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
   btnPressed: { transform: [{ scale: 0.99 }], opacity: 0.95 },
   editOverlay: {
     flex: 1,
